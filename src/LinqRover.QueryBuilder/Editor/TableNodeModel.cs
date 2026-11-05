@@ -20,8 +20,8 @@ public sealed class TableNodeModel : NodeModel
 
         foreach (var column in columns)
         {
-            var left = new ColumnPort(this, PortAlignment.Left, column.Name);
-            var right = new ColumnPort(this, PortAlignment.Right, column.Name);
+            var left = new ColumnPort(this, PortAlignment.Left, column);
+            var right = new ColumnPort(this, PortAlignment.Right, column);
             AddPort(left);
             AddPort(right);
             _left[column.Name] = left;
