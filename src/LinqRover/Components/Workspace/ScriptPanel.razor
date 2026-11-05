@@ -1,0 +1,81 @@
+<div class="h-full min-h-0 flex flex-col gap-2">
+    <div class="h-64 shrink-0">
+        <SqlEditor Profile="@Profile" Schema="@Schema" InitialText="@_code" Language="csharp"
+                   Busy="_busy" OnRun="RunAsync" />
+    </div>
+
+    @if (_error is not null)
+    {
+        <div role="alert" class="alert alert-error alert-soft text-sm py-2 shrink-0 font-mono-sql whitespace-pre-wrap">@_error</div>
+    }
+    else if (_status is not null)
+    {
+        <div class="shrink-0 text-xs opacity-70">@_status</div>
+    }
+
+    @if (_result is { Columns.Count: > 0 })
+    {
+        <div class="flex-1 min-h-0 relative">
+            <div class="absolute inset-0 flex flex-col">
+                <DataViewer @key="_key" LoadPage="LoadPage" PageSize="30" />
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Inject] private DatabaseProviders Providers { get; set; } = default!;
+
+    [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
+    [Parameter, EditorRequired] public string Schema { get; set; } = "";
+
+    private const int MaxRows = 1000;
+
+    // Las tablas están en `db`, como entidades de tipo compartido: db.Set<Dictionary<string, object?>>("esquema.tabla")
+    private const string DefaultCode = """
+        db.Set<Dictionary<string, object?>>("dbo.Asignaturas")
+            .Where(r => r["nombre"] != null)
+            .Select(r => new { Curso = r["curso"], IdAsig = r["id_asig"], Nombre = r["nombre"] })
+            .Take(30)
+        """;
+
+    private readonly string _code = DefaultCode;
+    private bool _busy;
+    private QueryResult? _result;
+    private string _key = "";
+    private string? _status;
+    private string? _error;
+
+    private async Task RunAsync(string code)
+    {
+        _busy = true;
+        _error = null;
+        _status = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var service = new Services.ScriptService(Providers);
+            _result = await service.RunAsync(Profile, Schema, code, MaxRows, cts.Token);
+            _key = Guid.NewGuid().ToString();
+
+            var ms = _result.Elapsed.TotalMilliseconds.ToString("0");
+            _status = $"{_result.Rows.Count} filas{(_result.Truncated ? $" (se muestran las primeras {MaxRows})" : "")} · {ms} ms (revertido)";
+        }
+        catch (Exception ex)
+        {
+            _result = null;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task<PageResult> LoadPage(int pageIndex, int pageSize)
+    {
+        var r = _result!;
+        var rows = r.Rows.Skip(pageIndex * pageSize).Take(pageSize).ToList();
+        return Task.FromResult(new PageResult(r.Columns, rows, r.Rows.Count, pageIndex, pageSize));
+    }
+}

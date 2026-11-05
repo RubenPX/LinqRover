@@ -227,7 +227,8 @@ public sealed class SqlServerDatabaseProvider : IDatabaseProvider
         return result;
     }
 
-    private static async Task<SqlConnection> OpenAsync(DbConnectionProfile profile, CancellationToken ct, bool useDatabase = true)
+    /// <summary>Cadena de conexión de SQL Server para un perfil (también la usa EF Core en el prototipo de scripts).</summary>
+    public static string BuildConnectionString(DbConnectionProfile profile, bool useDatabase = true)
     {
         var builder = new SqlConnectionStringBuilder
         {
@@ -241,8 +242,12 @@ public sealed class SqlServerDatabaseProvider : IDatabaseProvider
         };
         if (useDatabase && !string.IsNullOrWhiteSpace(profile.Database))
             builder.InitialCatalog = profile.Database;
+        return builder.ConnectionString;
+    }
 
-        var conn = new SqlConnection(builder.ConnectionString);
+    private static async Task<SqlConnection> OpenAsync(DbConnectionProfile profile, CancellationToken ct, bool useDatabase = true)
+    {
+        var conn = new SqlConnection(BuildConnectionString(profile, useDatabase));
         try
         {
             await conn.OpenAsync(ct);

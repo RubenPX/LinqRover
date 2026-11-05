@@ -18,6 +18,8 @@
     [Parameter] public string InitialText { get; set; } = "";
     [Parameter] public bool Busy { get; set; }
     [Parameter] public EventCallback<string> OnRun { get; set; }
+    /// <summary>Lenguaje del editor de Monaco: "sql" (por defecto) o "csharp" para el prototipo de scripts.</summary>
+    [Parameter] public string Language { get; set; } = "sql";
 
     private ElementReference _host;
     private DotNetObjectReference<SqlEditor>? _dotNet;
@@ -31,7 +33,7 @@
         _initialized = true;
 
         _dotNet = DotNetObjectReference.Create(this);
-        _editorId = await JS.InvokeAsync<string>("sqlEditor.create", _host, _dotNet, InitialText);
+        _editorId = await JS.InvokeAsync<string>("sqlEditor.create", _host, _dotNet, InitialText, Language);
         await PushTablesAsync();
     }
 

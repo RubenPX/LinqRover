@@ -118,11 +118,13 @@ window.sqlEditor = (function () {
         });
     }
 
-    async function create(element, dotNet, initialValue) {
+    async function create(element, dotNet, initialValue, language) {
         const monaco = await loadMonaco();
         const id = "sql-" + nextId++;
+        const lang = language || "sql";
+        const ext = lang === "csharp" ? "cs" : "sql";
         const model = monaco.editor.createModel(
-            initialValue || "", "sql", monaco.Uri.parse(`inmemory://query/${id}.sql`));
+            initialValue || "", lang, monaco.Uri.parse(`inmemory://query/${id}.${ext}`));
 
         const editor = monaco.editor.create(element, {
             model,
