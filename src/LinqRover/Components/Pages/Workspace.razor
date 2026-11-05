@@ -68,7 +68,7 @@
                                     <SchemaView TableName="@_selected" Columns="@_columns" />
                                     break;
                                 case "diagram":
-                                    <TableDiagram @key="DataKey" Profile="@_profile" Schema="@_schema" Table="@_selected"
+                                    <ZbdTableDiagram @key="DataKey" Profile="@_profile" Schema="@_schema" Table="@_selected"
                                                   OnSelect="SelectRelatedAsync" />
                                     break;
                                 case "builder":

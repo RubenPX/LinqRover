@@ -20,3 +20,16 @@ html, body {
 .font-mono-sql {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Cascadia Code", monospace;
 }
+
+/* Etiquetas de las FK en el diagrama de Z.Blazor: discretas, sin tapar las tablas */
+.diagram-link div.default-link-label {
+  background-color: var(--color-base-100);
+  color: var(--color-base-content);
+  border: 1px solid var(--color-base-300);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.2;
+  padding: 0 3px;
+  opacity: 0.9;
+  white-space: nowrap;
+}

@@ -1,0 +1,36 @@
+@using Blazor.Diagrams.Components.Renderers
+
+<div class="bg-base-100 rounded-lg shadow-sm font-mono-sql text-xs text-left select-none border-2 @(Node.IsCenter ? "border-primary" : "border-base-300")"
+     style="width: 250px">
+    <div class="px-2.5 py-1.5 font-semibold rounded-t-md truncate @(Node.IsCenter ? "bg-primary text-primary-content" : "bg-base-200")">
+        @Node.Title
+    </div>
+
+    @foreach (var column in Node.Columns)
+    {
+        <div class="relative flex items-center justify-between gap-2 px-2.5 h-5">
+            <PortRenderer Port="Node.LeftPort(column.Name)" />
+            <span class="flex-1 min-w-0 truncate text-left">@column.Name</span>
+            <span class="opacity-60 whitespace-nowrap text-right">@Badge(column)</span>
+            <PortRenderer Port="Node.RightPort(column.Name)" />
+        </div>
+    }
+
+    @if (Node.HiddenColumns > 0)
+    {
+        <div class="px-2.5 h-5 opacity-60">… @Node.HiddenColumns más</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TableNodeModel Node { get; set; } = default!;
+
+    private static string Badge(DiagramColumn c)
+    {
+        var parts = new List<string>();
+        if (c.IsPk) parts.Add("PK");
+        if (c.IsFk) parts.Add("FK");
+        if (c.IsRef) parts.Add("REF");
+        return parts.Count > 0 ? string.Join(" ", parts) : c.DataType;
+    }
+}

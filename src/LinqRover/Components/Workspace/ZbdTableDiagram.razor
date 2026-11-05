@@ -1,0 +1,153 @@
+@using Blazor.Diagrams
+@using Blazor.Diagrams.Components
+@using Blazor.Diagrams.Core
+@using Blazor.Diagrams.Core.Events
+@using Blazor.Diagrams.Core.Models
+@using Blazor.Diagrams.Core.Models.Base
+@using Blazor.Diagrams.Options
+@using Point = Blazor.Diagrams.Core.Geometry.Point
+@using LinqRover.Services
+
+<div class="h-full min-h-0 flex flex-col gap-2">
+    @if (_error is not null)
+    {
+        <div role="alert" class="alert alert-error alert-soft text-sm py-2">@_error</div>
+    }
+    else if (_diagram is null)
+    {
+        <span class="loading loading-spinner loading-sm"></span>
+    }
+    else
+    {
+        <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 cursor-pointer text-xs">
+                <input type="checkbox" class="checkbox checkbox-xs" @bind="_showLabels" @bind:after="RebuildDiagram" />
+                Mostrar nombres de FK
+            </label>
+        </div>
+
+        <div class="flex-1 min-h-0 border border-base-300 rounded-box overflow-hidden relative">
+            @* La clave fuerza a recrear el canvas cuando cambia el diagrama *@
+            <CascadingValue @key="_diagramVersion" Value="_diagram">
+                <DiagramCanvas Class="h-full w-full" />
+            </CascadingValue>
+        </div>
+    }
+</div>
+
+@code {
+    [Inject] private DatabaseProviders Providers { get; set; } = default!;
+
+    [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
+    [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    [Parameter, EditorRequired] public string Table { get; set; } = "";
+    [Parameter] public EventCallback<TableInfo> OnSelect { get; set; }
+
+    private BlazorDiagram? _diagram;
+    private DiagramLayoutResult? _layout;
+    private IReadOnlyList<ForeignKeyRef> _refs = [];
+    private bool _showLabels;
+    private int _diagramVersion;
+    private readonly Dictionary<string, IReadOnlyList<ColumnInfo>> _columnCache = [];
+    private string? _error;
+    private string? _loadedKey;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{Schema}.{Table}";
+        if (key == _loadedKey) return;
+        _loadedKey = key;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _diagram = null;
+        try
+        {
+            var provider = Providers.Get(Profile.Engine);
+            var center = new TableInfo(Schema, Table);
+            var refs = await provider.GetForeignKeysAsync(Profile, Schema, Table);
+
+            var tables = refs.SelectMany(r => new[] { r.Child, r.Parent }).DistinctBy(DiagramLayout.KeyOf).ToList();
+            if (!tables.Any(t => DiagramLayout.KeyOf(t) == DiagramLayout.KeyOf(center)))
+                tables.Add(center);
+
+            var columns = new Dictionary<string, IReadOnlyList<ColumnInfo>>();
+            foreach (var t in tables)
+                columns[DiagramLayout.KeyOf(t)] = await ColumnsAsync(provider, t);
+
+            // Posiciones y columnas visibles: se reutiliza la misma disposición que en la versión SVG.
+            _refs = refs;
+            _layout = DiagramLayout.Build(center, refs, columns);
+            _diagram = BuildDiagram();
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudo cargar el diagrama: {ex.Message}";
+        }
+    }
+
+    private void RebuildDiagram()
+    {
+        // Reconstruir es barato y evita depender de cómo la librería refresca las etiquetas.
+        _diagram = BuildDiagram();
+        _diagramVersion++;
+    }
+
+    private BlazorDiagram BuildDiagram()
+    {
+        var diagram = new BlazorDiagram(new BlazorDiagramOptions { AllowMultiSelection = false });
+        diagram.RegisterComponent<TableNodeModel, TableNodeWidget>();
+
+        var nodes = new Dictionary<string, TableNodeModel>();
+        foreach (var n in _layout!.Nodes)
+        {
+            var node = new TableNodeModel(new Point(n.X, n.Y), n.Table, n.Columns, n.HiddenColumns, n.IsCenter);
+            diagram.Nodes.Add(node);
+            nodes[DiagramLayout.KeyOf(n.Table)] = node;
+        }
+
+        // Cada FK va de la columna hija (puerto izquierdo) a la columna padre (puerto derecho).
+        foreach (var r in _refs)
+        {
+            if (!nodes.TryGetValue(DiagramLayout.KeyOf(r.Child), out var child)) continue;
+            if (!nodes.TryGetValue(DiagramLayout.KeyOf(r.Parent), out var parent)) continue;
+            if (ReferenceEquals(child, parent)) continue; // autorreferencias: fuera de esta prueba
+
+            var source = child.LeftPort(r.ChildColumn);
+            var target = parent.RightPort(r.ParentColumn);
+            if (source is null || target is null) continue; // columna oculta por el límite de filas
+
+            // Flecha grande apuntando a la tabla padre, y opcionalmente el nombre de la FK sobre la línea.
+            var link = new LinkModel(source, target)
+            {
+                TargetMarker = new LinkMarker("M 0 -7 L 14 0 L 0 7 z", 14),
+            };
+            if (_showLabels)
+                link.Labels.Add(new LinkLabelModel(link, r.ConstraintName, 0.5));
+            diagram.Links.Add(link);
+        }
+
+        diagram.PointerClick += HandlePointerClick;
+        return diagram;
+    }
+
+    private void HandlePointerClick(Model? model, Blazor.Diagrams.Core.Events.PointerEventArgs args)
+    {
+        if (model is TableNodeModel { IsCenter: false } node)
+            _ = InvokeAsync(() => OnSelect.InvokeAsync(node.Table));
+    }
+
+    private async Task<IReadOnlyList<ColumnInfo>> ColumnsAsync(IDatabaseProvider provider, TableInfo t)
+    {
+        var key = DiagramLayout.KeyOf(t);
+        if (!_columnCache.TryGetValue(key, out var cols))
+        {
+            cols = await provider.GetColumnsAsync(Profile, t.Schema, t.Name);
+            _columnCache[key] = cols;
+        }
+        return cols;
+    }
+}

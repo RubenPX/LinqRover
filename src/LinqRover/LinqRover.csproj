@@ -70,6 +70,7 @@
         <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
         <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
+        <PackageReference Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
     </ItemGroup>
 
     <ItemGroup>
