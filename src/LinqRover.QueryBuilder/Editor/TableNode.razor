@@ -1,4 +1,4 @@
-<div class="bg-base-100 rounded-lg shadow-sm font-mono-sql text-xs text-left select-none border-2 border-base-300" style="width: 240px;">
+<div class="bg-base-100 rounded-lg shadow-sm font-mono-sql text-xs text-left select-none border-2 @(Node.Selected ? "border-primary" : "border-base-300")" style="width: 240px;">
     <div class="px-2.5 py-1.5 font-semibold rounded-t-md truncate bg-base-200">@Node.Title</div>
 
     @foreach (var column in Node.Columns)
