@@ -142,6 +142,27 @@ window.sqlEditor = (function () {
         const K = monaco.languages.CompletionItemKind;
         const SNIPPET = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
 
+        // Tipo de Roslyn -> tipo de Monaco.
+        const ROSLYN_KINDS = {
+            Method: K.Method, ExtensionMethod: K.Method, Property: K.Property, Field: K.Field, Event: K.Event,
+            Class: K.Class, Struct: K.Struct, Interface: K.Interface, Enum: K.Enum, EnumMember: K.EnumMember,
+            Delegate: K.Function, Namespace: K.Module, Module: K.Module, Local: K.Variable, Parameter: K.Variable,
+            RangeVariable: K.Variable, Constant: K.Constant, Keyword: K.Keyword, Snippet: K.Snippet,
+            TypeParameter: K.TypeParameter, Label: K.Reference,
+        };
+
+        function roslynSuggestion(item, range) {
+            const isMethod = item.kind === "Method" || item.kind === "ExtensionMethod";
+            return {
+                label: item.label,
+                kind: ROSLYN_KINDS[item.kind] ?? K.Text,
+                insertText: isMethod ? `${item.insertText}($1)` : item.insertText,
+                insertTextRules: isMethod ? SNIPPET : undefined,
+                range,
+                sortText: item.sortText || item.label,
+            };
+        }
+
         monaco.languages.registerCompletionItemProvider("csharp", {
             triggerCharacters: [".", "\"", "["],
             provideCompletionItems: async (model, position) => {
@@ -155,6 +176,16 @@ window.sqlEditor = (function () {
                 const quoteRange = () => new monaco.Range(
                     position.lineNumber, line.lastIndexOf('"') + 2, position.lineNumber, position.column);
                 const suggestions = [];
+
+                // 0) Roslyn (en C#): conoce tipos, lambdas y métodos. Si no devuelve nada, se usan las heurísticas.
+                try {
+                    const items = await ctx.dotNet.invokeMethodAsync("Complete", model.getValue(), model.getOffsetAt(position));
+                    if (items && items.length > 0) {
+                        return { suggestions: items.map((i) => roslynSuggestion(i, wordRange)) };
+                    }
+                } catch (e) {
+                    // Sin Roslyn se sigue con las heurísticas.
+                }
 
                 // 1) Dentro de Set<...>("...") → tablas esquema.nombre
                 if (/Set<[^>]*>\(\s*"[^"]*$/.test(line)) {
@@ -239,8 +270,13 @@ window.sqlEditor = (function () {
         byModel.set(model.uri.toString(), ctx);
 
         // Ctrl+Enter ejecuta la consulta
-        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-            dotNet.invokeMethodAsync("Run", editor.getValue());
+        // addAction (no addCommand): el atajo solo actúa con este editor enfocado. Con addCommand, los atajos
+        // de todos los editores comparten un único registro global y gana el último creado (quizá ya desmontado).
+        editor.addAction({
+            id: `run-query-${id}`,
+            label: "Ejecutar consulta",
+            keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+            run: () => { dotNet.invokeMethodAsync("Run", editor.getValue()); },
         });
 
         return id;

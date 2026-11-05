@@ -16,6 +16,10 @@ public sealed class ScriptService(DatabaseProviders providers)
     // Modelos compilados. Se reutilizan mientras el esquema no cambie.
     private static readonly ConcurrentDictionary<string, CompiledModel> Models = new();
 
+    // Autocompletado: el esquema se lee una vez y se reutiliza unos minutos (no se consulta la base en cada tecla).
+    private static readonly ConcurrentDictionary<string, (DateTime Created, Task<ScriptCompletion> Task)> Completions = new();
+    private static readonly TimeSpan CompletionTtl = TimeSpan.FromMinutes(5);
+
     public async Task<QueryResult> RunAsync(
         DbConnectionProfile profile,
         string schema,
@@ -23,16 +27,7 @@ public sealed class ScriptService(DatabaseProviders providers)
         int maxRows,
         CancellationToken ct)
     {
-        var provider = providers.Get(profile.Engine);
-        var tables = new List<DynamicTable>();
-        foreach (var table in await provider.GetTablesAsync(profile, schema, ct))
-        {
-            var columns = await provider.GetColumnsAsync(profile, schema, table.Name, ct);
-            tables.Add(new DynamicTable(schema, table.Name,
-                columns.Select(c => new DynamicColumn(c.Name, c.DataType)).ToList()));
-        }
-
-        var model = GetOrCompile(profile, tables);
+        var model = await LoadModelAsync(profile, schema, ct);
 
         var connectionString = profile.Engine switch
         {
@@ -42,6 +37,62 @@ public sealed class ScriptService(DatabaseProviders providers)
         };
 
         return await TypedScriptRunner.ExecuteAsync(profile.Engine, connectionString, model, code, maxRows, ct);
+    }
+
+    /// <summary>Prepara el autocompletado del esquema (lectura de metadatos y compilación) sin esperar a una tecla.</summary>
+    public Task PrepareCompletionAsync(DbConnectionProfile profile, string schema) =>
+        GetCompletionAsync(profile, schema);
+
+    /// <summary>Sugerencias de C# (Roslyn) para el texto del script en la posición indicada.</summary>
+    public async Task<IReadOnlyList<CompletionSuggestion>> CompleteAsync(
+        DbConnectionProfile profile, string schema, string code, int offset)
+    {
+        var completion = await GetCompletionAsync(profile, schema);
+        return await completion.GetAsync(code, offset);
+    }
+
+    private Task<ScriptCompletion> GetCompletionAsync(DbConnectionProfile profile, string schema)
+    {
+        var key = profile.Id + "|" + profile.Engine + "|" + schema;
+        if (Completions.TryGetValue(key, out var entry) && DateTime.UtcNow - entry.Created < CompletionTtl)
+            return entry.Task;
+
+        var task = BuildCompletionAsync(profile, schema, key);
+        Completions[key] = (DateTime.UtcNow, task);
+        return task;
+    }
+
+    private async Task<ScriptCompletion> BuildCompletionAsync(DbConnectionProfile profile, string schema, string key)
+    {
+        try
+        {
+            // Sin token de cancelación: la caché no debe guardar un fallo por una petición cancelada.
+            var model = await LoadModelAsync(profile, schema, CancellationToken.None);
+            // Crear el workspace de Roslyn también es costoso: fuera del hilo de la interfaz.
+            return await Task.Run(() => new ScriptCompletion(model));
+        }
+        catch
+        {
+            Completions.TryRemove(key, out _);
+            throw;
+        }
+    }
+
+    /// <summary>Lee las tablas del esquema y devuelve su modelo compilado (reutilizado si la estructura no cambia).</summary>
+    private async Task<CompiledModel> LoadModelAsync(DbConnectionProfile profile, string schema, CancellationToken ct)
+    {
+        var provider = providers.Get(profile.Engine);
+        var tables = new List<DynamicTable>();
+        // ConfigureAwait(false): la lectura de metadatos no debe volver al hilo de la interfaz.
+        foreach (var table in await provider.GetTablesAsync(profile, schema, ct).ConfigureAwait(false))
+        {
+            var columns = await provider.GetColumnsAsync(profile, schema, table.Name, ct).ConfigureAwait(false);
+            tables.Add(new DynamicTable(schema, table.Name,
+                columns.Select(c => new DynamicColumn(c.Name, c.DataType)).ToList()));
+        }
+
+        // La compilación con Roslyn consume CPU durante segundos: se hace fuera del hilo de la interfaz.
+        return await Task.Run(() => GetOrCompile(profile, tables), CancellationToken.None).ConfigureAwait(false);
     }
 
     private static CompiledModel GetOrCompile(DbConnectionProfile profile, IReadOnlyList<DynamicTable> tables)
