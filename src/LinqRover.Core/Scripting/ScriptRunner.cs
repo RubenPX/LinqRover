@@ -76,7 +76,7 @@ public static class ScriptRunner
                 builder.UseSqlServer(connectionString);
                 break;
             case DatabaseEngine.Oracle:
-                builder.UseOracle(connectionString);
+                builder.UseOracle(connectionString).ReplaceService<Microsoft.EntityFrameworkCore.Query.IQuerySqlGeneratorFactory, Oracle11QuerySqlGeneratorFactory>();
                 break;
             default:
                 throw new NotSupportedException($"Motor no soportado para scripts: {engine}");

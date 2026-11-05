@@ -63,6 +63,46 @@ public static class TypedScriptRunner
     {
         var clock = Stopwatch.StartNew();
 
+        var (columns, rows, truncated) = await EvaluateAsync(engine, connectionString, model, code, ct, async value =>
+        {
+            var items = await ScriptRunner.ToListAsync(value, maxRows + 1, ct);
+            var isTruncated = items.Count > maxRows;
+            if (isTruncated)
+                items.RemoveAt(items.Count - 1);
+
+            var (cols, grid) = ScriptRunner.ToGrid(items);
+            return (cols, grid, isTruncated);
+        });
+
+        return new QueryResult(columns, rows, truncated, null, clock.Elapsed);
+    }
+
+    /// <summary>SQL que EF Core generaría para la consulta del script. La consulta no se ejecuta.</summary>
+    public static Task<string> GenerateSqlAsync(
+        DatabaseEngine engine,
+        string connectionString,
+        CompiledModel model,
+        string code,
+        CancellationToken ct = default) =>
+        EvaluateAsync(engine, connectionString, model, code, ct, value =>
+        {
+            if (value is not IQueryable query)
+                throw new InvalidOperationException("El script no devuelve una consulta (IQueryable), así que no hay SQL que mostrar.");
+            return Task.FromResult(query.ToQueryString());
+        });
+
+    /// <summary>
+    /// Evalúa el script contra el contexto tipado dentro de una transacción que siempre se deshace,
+    /// y entrega el valor devuelto a <paramref name="onValue"/> antes de deshacerla.
+    /// </summary>
+    private static async Task<T> EvaluateAsync<T>(
+        DatabaseEngine engine,
+        string connectionString,
+        CompiledModel model,
+        string code,
+        CancellationToken ct,
+        Func<object?, Task<T>> onValue)
+    {
         var contextType = model.Assembly.GetType($"{model.Namespace}.{ClassGenerator.ContextTypeName}")!;
         var globalsType = model.Assembly.GetType($"{model.Namespace}.{ClassGenerator.GlobalsTypeName}")!;
 
@@ -73,7 +113,7 @@ public static class TypedScriptRunner
                 builder.UseSqlServer(connectionString);
                 break;
             case DatabaseEngine.Oracle:
-                builder.UseOracle(connectionString);
+                builder.UseOracle(connectionString).ReplaceService<Microsoft.EntityFrameworkCore.Query.IQuerySqlGeneratorFactory, Oracle11QuerySqlGeneratorFactory>();
                 break;
             default:
                 throw new NotSupportedException($"Motor no soportado para scripts: {engine}");
@@ -95,14 +135,7 @@ public static class TypedScriptRunner
                 .WithImports("System", "System.Linq", "System.Collections.Generic", "Microsoft.EntityFrameworkCore", model.Namespace);
 
             var value = await CSharpScript.EvaluateAsync<object?>(code, scriptOptions, globals, globalsType, ct);
-
-            var items = await ScriptRunner.ToListAsync(value, maxRows + 1, ct);
-            var truncated = items.Count > maxRows;
-            if (truncated)
-                items.RemoveAt(items.Count - 1);
-
-            var (columns, rows) = ScriptRunner.ToGrid(items);
-            return new QueryResult(columns, rows, truncated, null, clock.Elapsed);
+            return await onValue(value);
         }
         finally
         {

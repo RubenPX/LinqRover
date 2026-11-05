@@ -3,6 +3,13 @@
         <button class="btn btn-primary btn-sm" disabled="@Busy" @onclick="RunClickedAsync">
             ▶ Ejecutar
         </button>
+        @if (OnPreview.HasDelegate)
+        {
+            <button class="btn btn-ghost btn-sm" disabled="@(Busy || _previewing)" title="Muestra el SQL que genera EF Core, sin ejecutarlo"
+                    @onclick="PreviewClickedAsync">
+                @(_previewing ? "Generando..." : "Ver SQL")
+            </button>
+        }
         <span class="text-xs opacity-60">Ctrl+Enter · Los cambios se deshacen siempre (solo lectura)</span>
     </div>
     <div @ref="_host" class="flex-1 min-h-0 border border-base-300 rounded-box overflow-hidden"></div>
@@ -22,12 +29,15 @@
     [Parameter] public string Language { get; set; } = "sql";
     /// <summary>Sugerencias de C# (Roslyn) para el texto y la posición del cursor. Si no se indica, se usan las heurísticas.</summary>
     [Parameter] public Func<string, int, Task<IReadOnlyList<CompletionSuggestion>>>? Completer { get; set; }
+    /// <summary>Acción del botón «Ver SQL» (solo se muestra si se indica).</summary>
+    [Parameter] public EventCallback<string> OnPreview { get; set; }
 
     private ElementReference _host;
     private DotNetObjectReference<SqlEditor>? _dotNet;
     private string? _editorId;
     private IReadOnlyList<string>? _sentTables;
     private bool _initialized;
+    private bool _previewing;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -65,6 +75,22 @@
         if (_editorId is null) return;
         var text = await JS.InvokeAsync<string>("sqlEditor.getValue", _editorId);
         await OnRun.InvokeAsync(text);
+    }
+
+    private async Task PreviewClickedAsync()
+    {
+        if (_editorId is null || _previewing) return;
+        _previewing = true;
+        StateHasChanged(); // el texto cambia a "Generando..." mientras dura la generación
+        try
+        {
+            var text = await JS.InvokeAsync<string>("sqlEditor.getValue", _editorId);
+            await OnPreview.InvokeAsync(text);
+        }
+        finally
+        {
+            _previewing = false;
+        }
     }
 
     /// <summary>Llamado desde el editor con Ctrl+Enter.</summary>
