@@ -85,7 +85,7 @@ public static class ClassGenerator
                     continue; // tipo no soportado: la columna no se mapea
 
                 var prop = Unique(Identifier(column.Name), usedProps);
-                props.Add((prop, column.Name, CSharpType(clr)));
+                props.Add((prop, column.Name, CSharpType(clr, column.IsNullable)));
             }
 
             entities.Add((table, typeName, member, props));
@@ -130,12 +130,16 @@ public static class ClassGenerator
         return sb.ToString();
     }
 
-    /// <summary>Tipo C# de una columna: los valores pueden ser nulos, así que llevan <c>?</c>.</summary>
-    public static string CSharpType(Type clr)
+    /// <summary>
+    /// Tipo C# de una columna. Las columnas que admiten NULL llevan <c>?</c>; las NOT NULL de tipo valor
+    /// (número, fecha, booleano) son tipo no anulable, para poder usarlas en <c>Contains</c>, comparaciones, etc.
+    /// </summary>
+    public static string CSharpType(Type clr, bool columnIsNullable = true)
     {
         var baseType = Nullable.GetUnderlyingType(clr) ?? clr;
         var name = TypeNames[baseType];
-        var nullable = clr != baseType || baseType == typeof(string) || baseType == typeof(byte[]);
+        var isReference = !baseType.IsValueType; // string y byte[]
+        var nullable = isReference || (columnIsNullable && clr != baseType);
         return nullable ? name + "?" : name;
     }
 

@@ -29,15 +29,22 @@ public sealed class ScriptService(DatabaseProviders providers)
     {
         var model = await LoadModelAsync(profile, schema, ct);
 
-        var connectionString = profile.Engine switch
-        {
-            DatabaseEngine.SqlServer => SqlServerDatabaseProvider.BuildConnectionString(profile),
-            DatabaseEngine.Oracle => OracleDatabaseProvider.BuildConnectionString(profile),
-            _ => throw new NotSupportedException($"Motor no soportado para scripts: {profile.Engine}"),
-        };
-
-        return await TypedScriptRunner.ExecuteAsync(profile.Engine, connectionString, model, code, maxRows, ct);
+        return await TypedScriptRunner.ExecuteAsync(profile.Engine, ConnectionString(profile), model, code, maxRows, ct);
     }
+
+    /// <summary>SQL que generaría EF Core para el script, sin ejecutarlo.</summary>
+    public async Task<string> GenerateSqlAsync(DbConnectionProfile profile, string schema, string code, CancellationToken ct)
+    {
+        var model = await LoadModelAsync(profile, schema, ct);
+        return await TypedScriptRunner.GenerateSqlAsync(profile.Engine, ConnectionString(profile), model, code, ct);
+    }
+
+    private static string ConnectionString(DbConnectionProfile profile) => profile.Engine switch
+    {
+        DatabaseEngine.SqlServer => SqlServerDatabaseProvider.BuildConnectionString(profile),
+        DatabaseEngine.Oracle => OracleDatabaseProvider.BuildConnectionString(profile),
+        _ => throw new NotSupportedException($"Motor no soportado para scripts: {profile.Engine}"),
+    };
 
     /// <summary>Prepara el autocompletado del esquema (lectura de metadatos y compilación) sin esperar a una tecla.</summary>
     public Task PrepareCompletionAsync(DbConnectionProfile profile, string schema) =>
@@ -88,7 +95,7 @@ public sealed class ScriptService(DatabaseProviders providers)
         {
             var columns = await provider.GetColumnsAsync(profile, schema, table.Name, ct).ConfigureAwait(false);
             tables.Add(new DynamicTable(schema, table.Name,
-                columns.Select(c => new DynamicColumn(c.Name, c.DataType)).ToList()));
+                columns.Select(c => new DynamicColumn(c.Name, c.DataType, c.IsNullable)).ToList()));
         }
 
         // La compilación con Roslyn consume CPU durante segundos: se hace fuera del hilo de la interfaz.
@@ -99,7 +106,7 @@ public sealed class ScriptService(DatabaseProviders providers)
     {
         // La clave incluye el perfil y la estructura de las tablas: si cambia una columna, se vuelve a compilar.
         var structure = string.Join("|", tables.Select(t =>
-            t.Key + ":" + string.Join(",", t.Columns.Select(c => c.Name + "=" + c.SqlType))));
+            t.Key + ":" + string.Join(",", t.Columns.Select(c => c.Name + "=" + c.SqlType + (c.IsNullable ? "" : "!")))));
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(profile.Id + "|" + profile.Engine + "|" + structure)));
 
         if (Models.TryGetValue(key, out var cached))

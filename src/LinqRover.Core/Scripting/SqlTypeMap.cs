@@ -2,8 +2,8 @@ using LinqRover.Core.Models;
 
 namespace LinqRover.Core.Scripting;
 
-/// <summary>Columna de una tabla dinámica: nombre y tipo tal como lo devuelve el proveedor (p. ej. "varchar(25)", "NUMBER(6)").</summary>
-public sealed record DynamicColumn(string Name, string SqlType);
+/// <summary>Columna de una tabla dinámica: nombre, tipo tal como lo devuelve el proveedor (p. ej. "varchar(25)", "NUMBER(6)") y si admite NULL.</summary>
+public sealed record DynamicColumn(string Name, string SqlType, bool IsNullable = true);
 
 /// <summary>Traduce los tipos de cada motor a tipos CLR anulables para mapear las columnas en EF Core.</summary>
 public static class SqlTypeMap
