@@ -1,0 +1,283 @@
+<div class="h-full min-h-0 flex flex-col gap-2 @(Active ? "" : "hidden")">
+    @if (IsSql)
+    {
+        <div class="flex-1 min-h-48 min-h-0 flex flex-col">
+            <SqlEditor @ref="_sqlEditor" Profile="@Profile" Schema="@Schema" TableNames="@TableNames"
+                       InitialText="@InitialText" Busy="@_busy" OnRun="RunSqlAsync" />
+        </div>
+
+        @if (_pendingSql is not null)
+        {
+            <div role="alert" class="alert alert-warning alert-soft text-sm py-2">
+                <span>La consulta no parece de lectura. Se ejecutará dentro de una transacción que se deshace, pero conviene confirmarlo.</span>
+                <button class="btn btn-sm" @onclick="ConfirmPendingAsync">Ejecutar de todos modos</button>
+                <button class="btn btn-sm btn-ghost" @onclick="() => _pendingSql = null">Cancelar</button>
+            </div>
+        }
+    }
+    else
+    {
+        <div class="@(_result is { Columns.Count: > 0 } ? "h-64 shrink-0" : "flex-1 min-h-0 flex flex-col")">
+            <SqlEditor Profile="@Profile" Schema="@Schema" TableNames="@TableNames" InitialText="@InitialText" Language="csharp"
+                       Busy="_busy" OnRun="RunScriptAsync" OnPreview="ShowSqlAsync" Completer="@CompleteAsync" />
+        </div>
+
+        @switch (_completionState)
+        {
+            case CompletionState.Preparing:
+                <div class="shrink-0 flex items-center gap-1 text-xs opacity-70">
+                    <span class="loading loading-spinner loading-xs"></span>
+                    Preparando el autocompletado (Roslyn)…
+                </div>
+                break;
+            case CompletionState.Failed:
+                <div class="shrink-0 text-xs text-warning" title="@_completionError">
+                    Autocompletado básico: no se pudo preparar Roslyn.
+                </div>
+                break;
+        }
+
+        @if (_sqlPreview is not null)
+        {
+            <div class="modal modal-open" role="dialog" aria-modal="true">
+                <div class="modal-box w-auto min-w-fit max-w-[90vw] flex flex-col gap-3">
+                    <div class="flex items-center justify-between gap-6">
+                        <h3 class="font-bold">SQL generado por EF Core (no se ha ejecutado)</h3>
+                        <button class="btn btn-ghost btn-sm" aria-label="Cerrar" @onclick="() => _sqlPreview = null">✕</button>
+                    </div>
+                    <pre class="overflow-auto max-h-[70vh] text-xs font-mono-sql whitespace-pre">@_sqlPreview</pre>
+                    <div class="modal-action mt-0">
+                        <button class="btn btn-sm" @onclick="() => _sqlPreview = null">Cerrar</button>
+                    </div>
+                </div>
+                <div class="modal-backdrop" @onclick="() => _sqlPreview = null"></div>
+            </div>
+        }
+    }
+
+    @if (_error is not null)
+    {
+        <div role="alert" class="alert alert-error alert-soft text-sm py-2 shrink-0 font-mono-sql whitespace-pre-wrap">@_error</div>
+    }
+    else if (_status is not null)
+    {
+        <p class="shrink-0 text-sm opacity-70">@_status</p>
+    }
+
+    @if (_result is { Columns.Count: > 0 })
+    {
+        <div class="@(IsSql ? "h-72 shrink-0" : "flex-1 min-h-0 relative")">
+            <div class="@(IsSql ? "h-full flex flex-col" : "absolute inset-0 flex flex-col")">
+                <DataViewer @key="_resultKey" LoadPage="LoadResultPage" PageSize="30" />
+            </div>
+        </div>
+    }
+
+    @if (IsSql && _history.Count > 0)
+    {
+        <details class="dropdown text-sm">
+            <summary class="btn btn-ghost btn-xs">Historial (@_history.Count)</summary>
+            <ul class="dropdown-content menu bg-base-100 rounded-box z-10 w-[32rem] max-h-64 overflow-y-auto shadow p-2">
+                @foreach (var item in _history)
+                {
+                    <li><button class="font-mono-sql text-xs truncate" @onclick="() => LoadFromHistoryAsync(item)">@item</button></li>
+                }
+            </ul>
+        </details>
+    }
+</div>
+
+@code {
+    private const int MaxRows = 1000;
+    private const int MaxHistory = 20;
+
+    [Inject] private DatabaseProviders Providers { get; set; } = default!;
+
+    [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
+    [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    /// <summary>Nombres de las tablas del esquema, para el autocompletado de db.</summary>
+    [Parameter] public IReadOnlyList<string> TableNames { get; set; } = [];
+    /// <summary>true: pestaña SQL. false: pestaña EF Script (C#).</summary>
+    [Parameter] public bool IsSql { get; set; } = true;
+    /// <summary>Texto con el que se abre el editor (consulta de ejemplo sobre la primera tabla).</summary>
+    [Parameter] public string InitialText { get; set; } = "";
+    /// <summary>Solo la pestaña activa se muestra; las demás siguen montadas para conservar su texto.</summary>
+    [Parameter] public bool Active { get; set; }
+
+    private SqlEditor? _sqlEditor;
+    private string _sqlText = "";
+    private bool _busy;
+    private QueryResult? _result;
+    private string _resultKey = "";
+    private string? _status;
+    private string? _error;
+    private string? _pendingSql;
+    private readonly List<string> _history = [];
+
+    // EF Script
+    private enum CompletionState { Preparing, Ready, Failed }
+    private CompletionState _completionState = CompletionState.Preparing;
+    private string? _completionError;
+    private string? _preparedKey;
+    private string? _sqlPreview;
+
+    protected override void OnParametersSet()
+    {
+        if (IsSql) return;
+
+        // Se prepara el autocompletado al abrir la pestaña (no al primer Ctrl+Espacio).
+        var key = $"{Profile.Id}|{Schema}";
+        if (key != _preparedKey)
+        {
+            _preparedKey = key;
+            _ = PrepareCompletionAsync();
+        }
+    }
+
+    private async Task PrepareCompletionAsync()
+    {
+        _completionState = CompletionState.Preparing;
+        try
+        {
+            await new Services.ScriptService(Providers).PrepareCompletionAsync(Profile, Schema);
+            _completionState = CompletionState.Ready;
+        }
+        catch (Exception ex)
+        {
+            _completionState = CompletionState.Failed;
+            _completionError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ---- SQL ----
+
+    private async Task RunSqlAsync(string text)
+    {
+        _sqlText = text;
+        _error = null;
+        _status = null;
+
+        var sql = text.Trim();
+        if (sql.Length == 0)
+        {
+            _error = "Escribe una consulta.";
+            return;
+        }
+
+        if (!SqlSafety.LooksReadOnly(sql))
+        {
+            _pendingSql = sql;
+            return;
+        }
+
+        await ExecuteSqlAsync(sql);
+    }
+
+    private async Task ConfirmPendingAsync()
+    {
+        var sql = _pendingSql;
+        _pendingSql = null;
+        if (sql is not null)
+            await ExecuteSqlAsync(sql);
+    }
+
+    private async Task ExecuteSqlAsync(string sql)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var result = await Providers.Get(Profile.Engine).ExecuteReadOnlyAsync(Profile, sql, MaxRows, cts.Token);
+
+            _result = result;
+            _resultKey = Guid.NewGuid().ToString();
+            var ms = result.Elapsed.TotalMilliseconds.ToString("0");
+            _status = result.Columns.Count == 0
+                ? $"Sentencia ejecutada · {result.RowsAffected ?? 0} filas afectadas · {ms} ms (revertido)"
+                : $"{result.Rows.Count} filas{(result.Truncated ? $" (se muestran las primeras {MaxRows})" : "")} · {ms} ms";
+
+            Remember(sql);
+        }
+        catch (Exception ex)
+        {
+            _result = null;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Remember(string sql)
+    {
+        _history.RemoveAll(h => h == sql);
+        _history.Insert(0, sql);
+        if (_history.Count > MaxHistory)
+            _history.RemoveRange(MaxHistory, _history.Count - MaxHistory);
+    }
+
+    private async Task LoadFromHistoryAsync(string sql)
+    {
+        _sqlText = sql;
+        if (_sqlEditor is not null)
+            await _sqlEditor.SetTextAsync(sql);
+    }
+
+    // ---- EF Script ----
+
+    private async Task RunScriptAsync(string code)
+    {
+        _busy = true;
+        _error = null;
+        _status = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            _result = await new Services.ScriptService(Providers).RunAsync(Profile, Schema, code, MaxRows, cts.Token);
+            _resultKey = Guid.NewGuid().ToString();
+
+            var ms = _result.Elapsed.TotalMilliseconds.ToString("0");
+            _status = $"{_result.Rows.Count} filas{(_result.Truncated ? $" (se muestran las primeras {MaxRows})" : "")} · {ms} ms (revertido)";
+        }
+        catch (Exception ex)
+        {
+            _result = null;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Muestra el SQL que EF Core generaría para el script, sin ejecutarlo.</summary>
+    private async Task ShowSqlAsync(string code)
+    {
+        _error = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            _sqlPreview = await new Services.ScriptService(Providers).GenerateSqlAsync(Profile, Schema, code, cts.Token);
+        }
+        catch (Exception ex)
+        {
+            _sqlPreview = null;
+            _error = ex.Message;
+        }
+    }
+
+    private Task<IReadOnlyList<CompletionSuggestion>> CompleteAsync(string code, int offset) =>
+        new Services.ScriptService(Providers).CompleteAsync(Profile, Schema, code, offset);
+
+    // ---- Resultados ----
+
+    private Task<PageResult> LoadResultPage(int pageIndex, int pageSize)
+    {
+        var r = _result!;
+        var rows = r.Rows.Skip(pageIndex * pageSize).Take(pageSize).ToList();
+        return Task.FromResult(new PageResult(r.Columns, rows, r.Rows.Count, pageIndex, pageSize));
+    }
+}
