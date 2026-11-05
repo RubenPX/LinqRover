@@ -2,147 +2,154 @@
 @inject ProfileStore Store
 @inject DatabaseProviders Providers
 
-<div class="flex h-full gap-4 -m-4 p-4 min-h-0">
-    <section class="w-64 shrink-0 card bg-base-100 border border-base-300 min-h-0">
-        <div class="card-body p-3 min-h-0">
-            @if (_profile is null)
-            {
-                <span class="loading loading-spinner loading-sm"></span>
-            }
-            else
-            {
-                <select class="select select-sm w-full" @onchange="OnSchemaChanged">
-                    @foreach (var schema in _schemas)
-                    {
-                        <option value="@schema" selected="@(schema == _schema)">@schema</option>
-                    }
-                </select>
-                <TablesPanel Tables="@_tables" SelectedTable="@_selected" OnSelect="SelectTableAsync" />
-            }
-        </div>
-    </section>
-
-    <section class="flex-1 min-w-0 flex flex-col gap-3 min-h-0">
-        @if (_error is not null)
+<div class="flex h-full gap-3 -m-4 p-4 min-h-0">
+    @* Barra lateral de tablas: colapsable *@
+    @if (_profile is not null)
+    {
+        @if (_sidebarCollapsed)
         {
-            <div role="alert" class="alert alert-error">
-                <span>@_error</span>
-                <button class="btn btn-sm" @onclick="Retry">Reintentar</button>
+            <div class="w-10 shrink-0 flex flex-col items-center py-2 card bg-base-100 border border-base-300">
+                <button class="btn btn-ghost btn-sm" aria-label="Mostrar tablas" title="Mostrar tablas" @onclick="() => _sidebarCollapsed = false">»</button>
             </div>
         }
-
-        @if (_profile is null && _error is null)
+        else
         {
-            <span class="loading loading-spinner"></span>
+            <aside class="w-64 shrink-0 min-h-0 flex flex-col card bg-base-100 border border-base-300">
+                <div class="card-body p-3 min-h-0 flex flex-col gap-2">
+                    <span class="badge badge-ghost self-start">@_profile.Name · @_profile.Engine.DisplayName()</span>
+                    <div class="flex items-center gap-2">
+                        <select class="select select-sm flex-1 min-w-0" @onchange="OnSchemaChanged">
+                            @foreach (var schema in _schemas)
+                            {
+                                <option value="@schema" selected="@(schema == _schema)">@schema</option>
+                            }
+                        </select>
+                        <button class="btn btn-ghost btn-sm" aria-label="Ocultar tablas" title="Ocultar tablas" @onclick="() => _sidebarCollapsed = true">«</button>
+                    </div>
+                    <div class="flex-1 min-h-0 overflow-y-auto">
+                        <TablesPanel Tables="@_tables" SelectedTable="@_selected" OnSelect="OpenTableAsync" />
+                    </div>
+                </div>
+            </aside>
         }
-        else if (_profile is not null)
-        {
-            <div class="flex items-center gap-2">
-                <h1 class="text-lg font-bold font-mono-sql">@(_selected ?? "—")</h1>
-                <span class="badge badge-ghost badge-sm">@_profile.Name · @_profile.Engine.DisplayName()</span>
+    }
+
+    <div class="flex-1 min-w-0 flex flex-col gap-3 min-h-0">
+    @if (_error is not null)
+    {
+        <div role="alert" class="alert alert-error">
+            <span>@_error</span>
+            <button class="btn btn-sm" @onclick="Retry">Reintentar</button>
+        </div>
+    }
+
+    @if (_profile is null && _error is null)
+    {
+        <span class="loading loading-spinner"></span>
+    }
+    else if (_profile is not null)
+    {
+
+        @* Barra de pestañas de consultas *@
+        <div class="flex items-center gap-1 border-b border-base-300 overflow-x-auto">
+            @foreach (var doc in _docs)
+            {
+                <div class="tab-group flex items-center rounded-t-box border border-b-0 border-base-300 px-2 py-1 text-sm cursor-pointer
+                            @(doc.Id == _activeDoc ? "bg-base-100 font-semibold" : "bg-base-200 opacity-80")"
+                     @onclick="() => _activeDoc = doc.Id">
+                    <span class="font-mono-sql">@doc.Title</span>
+                    <button class="btn btn-ghost btn-xs ml-1" aria-label="Cerrar pestaña"
+                            @onclick="() => CloseDoc(doc)" @onclick:stopPropagation="true">✕</button>
+                </div>
+            }
+
+            <div class="dropdown">
+                <button tabindex="0" class="btn btn-ghost btn-sm" aria-label="Nueva pestaña" @onclick="() => _showNewMenu = !_showNewMenu">+</button>
+                @if (_showNewMenu)
+                {
+                    <ul class="dropdown-content menu bg-base-100 rounded-box z-20 w-44 shadow p-2 mt-1">
+                        <li><button @onclick="() => AddDoc(isSql: true)">SQL</button></li>
+                        <li><button @onclick="() => AddDoc(isSql: false)">EF Script</button></li>
+                    </ul>
+                }
+            </div>
+        </div>
+
+        <div class="flex-1 min-h-0 relative">
+            @if (_docs.Count == 0)
+            {
+                <div class="h-full flex flex-col items-center justify-center gap-3 opacity-70">
+                    <p class="text-sm">No hay pestañas abiertas.</p>
+                    <div class="flex gap-2">
+                        <button class="btn btn-sm" @onclick="() => AddDoc(isSql: true)">Nueva pestaña SQL</button>
+                        <button class="btn btn-sm" @onclick="() => AddDoc(isSql: false)">Nueva pestaña EF Script</button>
+                    </div>
+                </div>
+            }
+
+            @foreach (var doc in _docs)
+            {
+                <div class="absolute inset-0 @(doc.Id == _activeDoc ? "" : "hidden")">
+                    <QueryTab @key="doc.Id" Profile="@_profile" Schema="@_schema" TableNames="@_tables"
+                              IsSql="@doc.IsSql" InitialText="@doc.Text" Active="@(doc.Id == _activeDoc)" />
+                </div>
+            }
+        </div>
+    }
+    </div>
+</div>
+
+@* Detalle de una tabla: datos, esquema y diagrama *@
+@if (_showTable && _selected is not null && _profile is not null)
+{
+    <div class="modal modal-open" role="dialog" aria-modal="true">
+        <div class="modal-box w-11/12 max-w-[90vw] h-[85vh] flex flex-col gap-3">
+            <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-2 min-w-0">
+                    <h3 class="font-bold font-mono-sql truncate">@_selected</h3>
+                    <span class="badge badge-ghost badge-sm">@_schema</span>
+                </div>
+                <button class="btn btn-ghost btn-sm" aria-label="Cerrar" @onclick="() => _showTable = false">✕</button>
             </div>
 
             <div role="tablist" class="tabs tabs-box tabs-sm w-fit bg-base-100">
-                @foreach (var tab in _tabs)
+                <button role="tab" class="tab @(_tableTab == "data" ? "tab-active" : "")" @onclick='() => _tableTab = "data"'>Datos</button>
+                <button role="tab" class="tab @(_tableTab == "schema" ? "tab-active" : "")" @onclick='() => _tableTab = "schema"'>Esquema</button>
+                <button role="tab" class="tab @(_tableTab == "diagram" ? "tab-active" : "")" @onclick='() => _tableTab = "diagram"'>Diagrama</button>
+            </div>
+
+            <div class="flex-1 min-h-0 flex flex-col">
+                @switch (_tableTab)
                 {
-                    <button role="tab" class="tab @(_activeTab == tab.Key ? "tab-active" : "")"
-                            @onclick="() => _activeTab = tab.Key">
-                        @tab.Label
-                    </button>
+                    case "data":
+                        <DataViewer @key="DataKey" LoadPage="LoadPageAsync" PageSize="30" />
+                        break;
+                    case "schema":
+                        <SchemaView TableName="@_selected" Columns="@_columns" />
+                        break;
+                    case "diagram":
+                        <ZbdTableDiagram @key="DataKey" Profile="@_profile" Schema="@_schema" Table="@_selected"
+                                         OnSelect="SelectRelatedAsync" />
+                        break;
                 }
             </div>
-
-            <div class="card bg-base-100 border border-base-300 flex-1 min-h-0 overflow-hidden">
-                <div class="card-body p-3 min-h-0 h-full">
-
-                    @* Pestañas de tabla: se montan solo cuando están activas *@
-                    <div class="@(_activeTab is "sql" or "script" ? "hidden" : "h-full min-h-0 flex flex-col")">
-                        @if (_selected is not null)
-                        {
-                            @switch (_activeTab)
-                            {
-                                case "data":
-                                    <DataViewer @key="DataKey" LoadPage="LoadPageAsync" PageSize="30" />
-                                    break;
-                                case "schema":
-                                    <SchemaView TableName="@_selected" Columns="@_columns" />
-                                    break;
-                                case "diagram":
-                                    <ZbdTableDiagram @key="DataKey" Profile="@_profile" Schema="@_schema" Table="@_selected"
-                                                  OnSelect="SelectRelatedAsync" />
-                                    break;
-                                case "builder":
-                                    <ComingSoon Title="Constructor visual" Text="Arrastra bloques para generar una consulta." />
-                                    break;
-                            }
-                        }
-                        else
-                        {
-                            <p class="opacity-60 text-sm">Este esquema no tiene tablas.</p>
-                        }
-                    </div>
-
-                    @* Prototipo: scripts C# con EF Core sobre la conexión *@
-                    <div class="@(_activeTab == "script" ? "h-full min-h-0 flex flex-col" : "hidden")">
-                        <ScriptPanel @key="DataKey" Profile="@_profile" Schema="@_schema" TableNames="@_tables" Table="@_selected" Columns="@_columns" />
-                    </div>
-
-                    @* El editor se mantiene montado para no perder el texto al cambiar de pestaña *@
-                    <div class="@(_activeTab == "sql" ? "h-full min-h-0 flex flex-col gap-3" : "hidden")">
-                        <div class="flex-1 min-h-48 min-h-0 flex flex-col">
-                            <SqlEditor @ref="_sqlEditor" Profile="@_profile" Schema="@_schema" TableNames="@_tables"
-                                       InitialText="@_sqlText" Busy="@_queryBusy" OnRun="RunQueryAsync" />
-                        </div>
-
-                        @if (_pendingSql is not null)
-                        {
-                            <div role="alert" class="alert alert-warning alert-soft text-sm py-2">
-                                <span>La consulta no parece de lectura. Se ejecutará dentro de una transacción que se deshace, pero conviene confirmarlo.</span>
-                                <button class="btn btn-sm" @onclick="ConfirmPendingAsync">Ejecutar de todos modos</button>
-                                <button class="btn btn-sm btn-ghost" @onclick="() => _pendingSql = null">Cancelar</button>
-                            </div>
-                        }
-
-                        @if (_queryError is not null)
-                        {
-                            <div role="alert" class="alert alert-error alert-soft text-sm py-2 font-mono-sql whitespace-pre-wrap">@_queryError</div>
-                        }
-                        else if (_queryStatus is not null)
-                        {
-                            <p class="text-sm opacity-70">@_queryStatus</p>
-                        }
-
-                        @if (_result is { Columns.Count: > 0 })
-                        {
-                            <div class="h-72 shrink-0 flex flex-col">
-                                <DataViewer @key="@_queryKey" LoadPage="LoadResultPage" PageSize="30" />
-                            </div>
-                        }
-
-                        @if (_history.Count > 0)
-                        {
-                            <details class="dropdown text-sm">
-                                <summary class="btn btn-ghost btn-xs">Historial (@_history.Count)</summary>
-                                <ul class="dropdown-content menu bg-base-100 rounded-box z-10 w-[32rem] max-h-64 overflow-y-auto shadow p-2">
-                                    @foreach (var item in _history)
-                                    {
-                                        <li><button class="font-mono-sql text-xs truncate" @onclick="() => LoadFromHistoryAsync(item)">@item</button></li>
-                                    }
-                                </ul>
-                            </details>
-                        }
-                    </div>
-                </div>
-            </div>
-        }
-    </section>
-</div>
+        </div>
+        <div class="modal-backdrop" @onclick="() => _showTable = false"></div>
+    </div>
+}
 
 @code {
-    private const int MaxRows = 1000;
-    private const int MaxHistory = 20;
-
     [Parameter] public Guid ProfileId { get; set; }
+
+    /// <summary>Pestaña de consulta abierta (SQL o EF Script).</summary>
+    private sealed class QueryDocument
+    {
+        public Guid Id { get; } = Guid.NewGuid();
+        public bool IsSql { get; init; }
+        public string Title { get; init; } = "";
+        /// <summary>Texto inicial del editor.</summary>
+        public string Text { get; init; } = "";
+    }
 
     private string DataKey => $"{_schema}.{_selected}";
 
@@ -153,28 +160,18 @@
     private string? _selected;
     private IReadOnlyList<ColumnInfo> _columns = [];
     private string? _error;
-    private string _activeTab = "data";
 
-    // Consultas libres
-    private SqlEditor? _sqlEditor;
-    private string _sqlText = "";
-    private bool _queryBusy;
-    private QueryResult? _result;
-    private string _queryKey = "";
-    private string? _queryStatus;
-    private string? _queryError;
-    private string? _pendingSql;
-    private readonly List<string> _history = [];
+    // Modales de tablas
+    private bool _sidebarCollapsed;
+    private bool _showTable;
+    private string _tableTab = "data";
 
-    private readonly (string Key, string Label)[] _tabs =
-    [
-        ("data", "Datos"),
-        ("sql", "SQL"),
-        ("schema", "Esquema"),
-        ("diagram", "Diagrama"),
-        ("builder", "Constructor"),
-        ("script", "Script EF"),
-    ];
+    // Pestañas de consulta
+    private readonly List<QueryDocument> _docs = [];
+    private Guid? _activeDoc;
+    private bool _showNewMenu;
+    private int _sqlCount;
+    private int _efCount;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -221,12 +218,20 @@
         {
             var tables = await Providers.Get(_profile.Engine).GetTablesAsync(_profile, _schema);
             _tables = tables.Select(t => t.Name).ToList();
-            await SelectTableAsync(_tables.FirstOrDefault());
+            _selected = null;
+            _columns = [];
         }
         catch (Exception ex)
         {
             _error = $"No se pudieron leer las tablas: {ex.Message}";
         }
+    }
+
+    private async Task OpenTableAsync(string table)
+    {
+        await SelectTableAsync(table);
+        _tableTab = "data";
+        _showTable = true;
     }
 
     private async Task SelectTableAsync(string? table)
@@ -259,86 +264,49 @@
     private Task<PageResult> LoadPageAsync(int pageIndex, int pageSize) =>
         Providers.Get(_profile!.Engine).GetPageAsync(_profile!, _schema, _selected!, pageIndex, pageSize);
 
-    // ---- Consultas libres ----
+    // ---- Pestañas de consulta ----
 
-    private async Task RunQueryAsync(string text)
+    /// <summary>
+    /// Consulta inicial: SELECT de las primeras 30 filas de la primera tabla del esquema.
+    /// Si el esquema no tiene tablas, la pestaña sale vacía.
+    /// </summary>
+    private string DefaultText(bool isSql)
     {
-        _sqlText = text;
-        _queryError = null;
-        _queryStatus = null;
+        const int limit = 30;
+        var table = _tables.FirstOrDefault();
+        if (table is null || _profile is null)
+            return "";
 
-        var sql = text.Trim();
-        if (sql.Length == 0)
-        {
-            _queryError = "Escribe una consulta.";
-            return;
-        }
+        if (!isSql)
+            return $"var query = db.{ClassGenerator.ContextMemberName(table)}\n    .Take({limit});\n\nreturn query;";
 
-        if (!SqlSafety.LooksReadOnly(sql))
-        {
-            _pendingSql = sql;
-            return;
-        }
-
-        await ExecuteAsync(sql);
+        return _profile.Engine == DatabaseEngine.SqlServer
+            ? $"SELECT TOP ({limit}) * FROM {BracketName(_schema)}.{BracketName(table)}"
+            : $"SELECT * FROM {QuoteName(_schema)}.{QuoteName(table)} WHERE ROWNUM <= {limit}";
     }
 
-    private async Task ConfirmPendingAsync()
-    {
-        var sql = _pendingSql;
-        _pendingSql = null;
-        if (sql is not null)
-            await ExecuteAsync(sql);
-    }
+    private static string BracketName(string name) => "[" + name.Replace("]", "]]") + "]";
 
-    private async Task ExecuteAsync(string sql)
+    private static string QuoteName(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+
+    private void AddDoc(bool isSql)
     {
-        _queryBusy = true;
-        _queryError = null;
-        try
+        _showNewMenu = false;
+        var doc = new QueryDocument
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-            var result = await Providers.Get(_profile!.Engine).ExecuteReadOnlyAsync(_profile!, sql, MaxRows, cts.Token);
-
-            _result = result;
-            _queryKey = Guid.NewGuid().ToString();
-            var ms = result.Elapsed.TotalMilliseconds.ToString("0");
-            _queryStatus = result.Columns.Count == 0
-                ? $"Sentencia ejecutada · {result.RowsAffected ?? 0} filas afectadas · {ms} ms (revertido)"
-                : $"{result.Rows.Count} filas{(result.Truncated ? $" (se muestran las primeras {MaxRows})" : "")} · {ms} ms";
-
-            Remember(sql);
-        }
-        catch (Exception ex)
-        {
-            _result = null;
-            _queryError = ex.Message;
-        }
-        finally
-        {
-            _queryBusy = false;
-        }
+            IsSql = isSql,
+            Title = isSql ? $"SQL {++_sqlCount}" : $"EF {++_efCount}",
+            Text = DefaultText(isSql),
+        };
+        _docs.Add(doc);
+        _activeDoc = doc.Id;
     }
 
-    private void Remember(string sql)
+    private void CloseDoc(QueryDocument doc)
     {
-        _history.RemoveAll(h => h == sql);
-        _history.Insert(0, sql);
-        if (_history.Count > MaxHistory)
-            _history.RemoveRange(MaxHistory, _history.Count - MaxHistory);
-    }
-
-    private async Task LoadFromHistoryAsync(string sql)
-    {
-        _sqlText = sql;
-        if (_sqlEditor is not null)
-            await _sqlEditor.SetTextAsync(sql);
-    }
-
-    private Task<PageResult> LoadResultPage(int pageIndex, int pageSize)
-    {
-        var r = _result!;
-        var rows = r.Rows.Skip(pageIndex * pageSize).Take(pageSize).ToList();
-        return Task.FromResult(new PageResult(r.Columns, rows, r.Rows.Count, pageIndex, pageSize));
+        var index = _docs.IndexOf(doc);
+        _docs.Remove(doc);
+        if (_activeDoc == doc.Id)
+            _activeDoc = _docs.Count == 0 ? null : _docs[Math.Min(index, _docs.Count - 1)].Id;
     }
 }

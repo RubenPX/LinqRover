@@ -1,7 +1,7 @@
 <div class="flex flex-col gap-2 h-full min-h-0">
     <input class="input input-sm w-full" placeholder="Buscar tabla..." @bind="_filter" @bind:event="oninput" />
 
-    <ul class="menu menu-sm p-0 overflow-y-auto flex-1 min-h-0">
+    <ul class="menu menu-sm p-0 w-full flex-nowrap overflow-y-auto flex-1 min-h-0">
         @foreach (var table in Filtered)
         {
             <li>
