@@ -39,21 +39,11 @@ public sealed class ColumnPort : PortModel
             (l.Source?.Model == target && l.Target?.Model == this));
 
     /// <summary>
-    /// Compatibles si pertenecen a la misma familia (texto, número, fecha). La longitud y la precisión no importan:
-    /// VARCHAR2(12) se une con VARCHAR2(11). Los tipos desconocidos solo se unen con el mismo nombre de tipo.
+    /// Tipo exacto: el tipo completo, con su longitud o precisión, tiene que coincidir.
+    /// Ejemplo: NUMBER(2) no se une con NUMBER(10), y VARCHAR2(12) no se une con VARCHAR2(11).
     /// </summary>
-    public static bool TypesCompatible(string a, string b) => FamilyOf(a) == FamilyOf(b);
+    public static bool TypesCompatible(string a, string b) => Normalize(a) == Normalize(b);
 
-    private static string FamilyOf(string dataType)
-    {
-        var baseName = dataType.Split('(')[0].Trim().ToUpperInvariant();
-        return baseName switch
-        {
-            "NUMBER" or "NUMERIC" or "DECIMAL" or "INT" or "INTEGER" or "BIGINT" or "SMALLINT" or "TINYINT"
-                or "FLOAT" or "REAL" or "DOUBLE" or "BINARY_FLOAT" or "BINARY_DOUBLE" or "MONEY" or "SMALLMONEY" => "NUM",
-            "DATE" or "TIMESTAMP" or "DATETIME" or "DATETIME2" or "SMALLDATETIME" => "DATE",
-            "VARCHAR" or "VARCHAR2" or "NVARCHAR" or "NVARCHAR2" or "CHAR" or "NCHAR" or "CLOB" or "NCLOB" or "TEXT" => "TEXT",
-            _ => baseName,
-        };
-    }
+    private static string Normalize(string dataType) =>
+        new string(dataType.Where(c => !char.IsWhiteSpace(c)).ToArray()).ToUpperInvariant();
 }
