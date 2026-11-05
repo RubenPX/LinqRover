@@ -102,7 +102,7 @@ public sealed class ProfileStore
     private StoredProfile ToStored(DbConnectionProfile p) => new(
         p.Id, p.Name, p.Engine, p.Host, p.Port, p.Database, p.User,
         string.IsNullOrEmpty(p.Password) ? "" : _protector.Protect(p.Password),
-        p.TrustServerCertificate);
+        p.TrustServerCertificate, p.DefaultSchema);
 
     private DbConnectionProfile ToProfile(StoredProfile s) => new(
         s.Name, s.Engine, s.Host, s.Port, s.Database, s.User,
@@ -110,6 +110,7 @@ public sealed class ProfileStore
     {
         Id = s.Id,
         TrustServerCertificate = s.TrustServerCertificate,
+        DefaultSchema = s.DefaultSchema,
     };
 
     internal sealed record StoredProfile(
@@ -121,5 +122,6 @@ public sealed class ProfileStore
         string Database,
         string User,
         string EncryptedPassword,
-        bool TrustServerCertificate);
+        bool TrustServerCertificate,
+        string? DefaultSchema = null);
 }

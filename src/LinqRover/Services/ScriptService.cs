@@ -14,9 +14,6 @@ public sealed class ScriptService(DatabaseProviders providers)
         int maxRows,
         CancellationToken ct)
     {
-        if (profile.Engine != DatabaseEngine.SqlServer)
-            throw new NotSupportedException("El prototipo de scripts solo funciona con SQL Server por ahora.");
-
         var provider = providers.Get(profile.Engine);
         var tables = new List<DynamicTable>();
         foreach (var table in await provider.GetTablesAsync(profile, schema, ct))
@@ -26,7 +23,13 @@ public sealed class ScriptService(DatabaseProviders providers)
                 columns.Select(c => new DynamicColumn(c.Name, c.DataType)).ToList()));
         }
 
-        var connectionString = SqlServerDatabaseProvider.BuildConnectionString(profile);
-        return await ScriptRunner.ExecuteAsync(connectionString, tables, code, maxRows, ct);
+        var connectionString = profile.Engine switch
+        {
+            DatabaseEngine.SqlServer => SqlServerDatabaseProvider.BuildConnectionString(profile),
+            DatabaseEngine.Oracle => OracleDatabaseProvider.BuildConnectionString(profile),
+            _ => throw new NotSupportedException($"Motor no soportado para scripts: {profile.Engine}"),
+        };
+
+        return await ScriptRunner.ExecuteAsync(profile.Engine, connectionString, tables, code, maxRows, ct);
     }
 }

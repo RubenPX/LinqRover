@@ -48,7 +48,7 @@
     {
         _sentTables = TableNames;
         if (_editorId is not null)
-            await JS.InvokeVoidAsync("sqlEditor.setTables", _editorId, TableNames);
+            await JS.InvokeVoidAsync("sqlEditor.setTables", _editorId, TableNames, Schema);
     }
 
     /// <summary>Pone un texto en el editor (por ejemplo, desde el historial).</summary>

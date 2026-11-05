@@ -24,6 +24,7 @@ window.sqlEditor = (function () {
                 window.require.config({ paths: { vs: "lib/monaco/vs" } });
                 window.require(["vs/editor/editor.main"], () => {
                     registerProvider(window.monaco);
+                    registerCSharpProvider(window.monaco);
                     resolve(window.monaco);
                 });
             });
@@ -118,6 +119,102 @@ window.sqlEditor = (function () {
         });
     }
 
+    // Métodos LINQ habituales, con snippets para rellenar los argumentos.
+    const LINQ_METHODS = [
+        ["Where", "Where(r => $1)"],
+        ["Select", "Select(r => $1)"],
+        ["OrderBy", "OrderBy(r => $1)"],
+        ["OrderByDescending", "OrderByDescending(r => $1)"],
+        ["GroupBy", "GroupBy(r => $1)"],
+        ["Take", "Take(${1:30})"],
+        ["Skip", "Skip(${1:0})"],
+        ["Distinct", "Distinct()"],
+        ["First", "First()"],
+        ["FirstOrDefault", "FirstOrDefault()"],
+        ["Count", "Count()"],
+        ["Any", "Any(r => $1)"],
+        ["ToList", "ToList()"],
+        ["ToListAsync", "ToListAsync()"],
+    ];
+
+    // Autocompletado de C# para el script de EF Core. No es un análisis de tipos: usa los metadatos de la conexión.
+    function registerCSharpProvider(monaco) {
+        const K = monaco.languages.CompletionItemKind;
+        const SNIPPET = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+
+        monaco.languages.registerCompletionItemProvider("csharp", {
+            triggerCharacters: [".", "\"", "["],
+            provideCompletionItems: async (model, position) => {
+                const ctx = byModel.get(model.uri.toString());
+                if (!ctx) return { suggestions: [] };
+
+                const line = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+                const word = model.getWordUntilPosition(position);
+                const wordRange = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
+                // Dentro de comillas: el rango va desde la comilla abierta hasta el cursor.
+                const quoteRange = () => new monaco.Range(
+                    position.lineNumber, line.lastIndexOf('"') + 2, position.lineNumber, position.column);
+                const suggestions = [];
+
+                // 1) Dentro de Set<...>("...") → tablas esquema.nombre
+                if (/Set<[^>]*>\(\s*"[^"]*$/.test(line)) {
+                    for (const t of ctx.tables) {
+                        const full = ctx.schema ? `${ctx.schema}.${t}` : t;
+                        suggestions.push({ label: full, kind: K.Class, detail: "tabla", insertText: full, range: quoteRange() });
+                    }
+                    return { suggestions };
+                }
+
+                // 2) Dentro de r["..."] → columnas de la tabla que aparece en el script
+                if (/\["[^"]*$/.test(line)) {
+                    const table = currentTable(model.getValue(), ctx.schema);
+                    if (table) {
+                        for (const c of await getColumns(ctx, table)) {
+                            suggestions.push({ label: c.name, kind: K.Field, detail: c.dataType, insertText: c.name, range: quoteRange() });
+                        }
+                    }
+                    return { suggestions };
+                }
+
+                // 3) db. → Set<...>
+                if (/\bdb\.\w*$/.test(line)) {
+                    suggestions.push({
+                        label: "Set", kind: K.Method, detail: "tabla por nombre",
+                        insertText: 'Set<Dictionary<string, object?>>("$1")', insertTextRules: SNIPPET, range: wordRange,
+                    });
+                    return { suggestions };
+                }
+
+                // 4) .algo → métodos LINQ
+                if (/\.\w*$/.test(line)) {
+                    for (const [label, snippet] of LINQ_METHODS) {
+                        suggestions.push({ label, kind: K.Method, detail: "LINQ", insertText: snippet, insertTextRules: SNIPPET, range: wordRange });
+                    }
+                    return { suggestions };
+                }
+
+                // 5) General: db, plantillas de script
+                suggestions.push(
+                    { label: "db", kind: K.Variable, detail: "contexto de la conexión", insertText: "db", range: wordRange },
+                    { label: "var query", kind: K.Snippet, detail: "consulta", insertText: "var query = $1;", insertTextRules: SNIPPET, range: wordRange },
+                    { label: "return query", kind: K.Snippet, detail: "devolver la consulta", insertText: "return query;", range: wordRange },
+                );
+                return { suggestions };
+            },
+        });
+    }
+
+    /// <summary>Tabla usada en el script: la última de db.Set&lt;...&gt;("esquema.tabla") del texto.</summary>
+    function currentTable(text, schema) {
+        const re = /Set<[^>]*>\(\s*"([^"]+)"/g;
+        let last = null;
+        let m;
+        while ((m = re.exec(text)) !== null) last = m[1];
+        if (!last) return null;
+        const parts = last.split(".");
+        return parts[parts.length - 1];
+    }
+
     async function create(element, dotNet, initialValue, language) {
         const monaco = await loadMonaco();
         const id = "sql-" + nextId++;
@@ -150,10 +247,11 @@ window.sqlEditor = (function () {
         return id;
     }
 
-    function setTables(id, tables) {
+    function setTables(id, tables, schema) {
         const ctx = contexts.get(id);
         if (!ctx) return;
         ctx.tables = tables || [];
+        ctx.schema = schema || "";
         ctx.columns.clear(); // al cambiar de esquema, las columnas cacheadas ya no valen
     }
 

@@ -17,4 +17,7 @@ public sealed record DbConnectionProfile(
 
     /// <summary>SQL Server: acepta el certificado del servidor sin validarlo (solo redes de confianza).</summary>
     public bool TrustServerCertificate { get; init; }
+
+    /// <summary>Esquema que se abre al conectar. Si es null, se usa el del proveedor por defecto.</summary>
+    public string? DefaultSchema { get; init; }
 }

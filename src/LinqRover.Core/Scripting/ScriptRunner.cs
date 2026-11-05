@@ -7,6 +7,7 @@ using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
+using Oracle.EntityFrameworkCore;
 
 namespace LinqRover.Core.Scripting;
 
@@ -17,6 +18,7 @@ namespace LinqRover.Core.Scripting;
 public static class ScriptRunner
 {
     public static async Task<QueryResult> ExecuteAsync(
+        DatabaseEngine engine,
         string connectionString,
         IReadOnlyList<DynamicTable> tables,
         string code,
@@ -25,12 +27,13 @@ public static class ScriptRunner
     {
         var clock = Stopwatch.StartNew();
 
-        var options = new DbContextOptionsBuilder<DynamicDbContext>()
-            .UseSqlServer(connectionString)
+        var builder = new DbContextOptionsBuilder<DynamicDbContext>();
+        ConfigureProvider(builder, engine, connectionString);
+        var options = builder
             .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
             .Options;
 
-        await using var db = new DynamicDbContext(options, tables);
+        await using var db = new DynamicDbContext(options, tables, engine);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
 
         var scriptOptions = ScriptOptions.Default
@@ -58,6 +61,25 @@ public static class ScriptRunner
         {
             // Se deshace aunque la petición se haya cancelado.
             await tx.RollbackAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Configura el proveedor de EF Core. Oracle.EntityFrameworkCore 10 solo genera SQL para Oracle 19c o superior
+    /// (paginación con OFFSET/FETCH). Con Oracle 11g, un Take() de un script fallará con ORA-00933.
+    /// </summary>
+    private static void ConfigureProvider(DbContextOptionsBuilder<DynamicDbContext> builder, DatabaseEngine engine, string connectionString)
+    {
+        switch (engine)
+        {
+            case DatabaseEngine.SqlServer:
+                builder.UseSqlServer(connectionString);
+                break;
+            case DatabaseEngine.Oracle:
+                builder.UseOracle(connectionString);
+                break;
+            default:
+                throw new NotSupportedException($"Motor no soportado para scripts: {engine}");
         }
     }
 

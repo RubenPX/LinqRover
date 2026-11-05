@@ -15,6 +15,9 @@ public sealed class ConnectionDraft
     public string Password { get; set; } = "";
     public bool TrustServerCertificate { get; set; }
 
+    /// <summary>Esquema por defecto (solo Oracle). Se rellena con la lista de esquemas del servidor.</summary>
+    public string? DefaultSchema { get; set; }
+
     public static int DefaultPort(DatabaseEngine engine) => engine switch
     {
         DatabaseEngine.Oracle => 1521,
@@ -53,6 +56,7 @@ public sealed class ConnectionDraft
             User = profile.User,
             Password = profile.Password,
             TrustServerCertificate = profile.TrustServerCertificate,
+            DefaultSchema = profile.DefaultSchema,
         };
 
     public DbConnectionProfile ToProfile() => new(
@@ -60,6 +64,7 @@ public sealed class ConnectionDraft
     {
         Id = Id,
         TrustServerCertificate = Engine == DatabaseEngine.SqlServer && TrustServerCertificate,
+        DefaultSchema = Engine == DatabaseEngine.Oracle ? DefaultSchema : null,
     };
 
     /// <summary>Devuelve un mensaje de error o null si el formulario es válido.</summary>
