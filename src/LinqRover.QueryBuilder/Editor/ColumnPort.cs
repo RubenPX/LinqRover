@@ -39,11 +39,11 @@ public sealed class ColumnPort : PortModel
             (l.Source?.Model == target && l.Target?.Model == this));
 
     /// <summary>
-    /// Tipo exacto: el tipo completo, con su longitud o precisión, tiene que coincidir.
-    /// Ejemplo: NUMBER(2) no se une con NUMBER(10), y VARCHAR2(12) no se une con VARCHAR2(11).
+    /// Solo el tipo base: NUMBER(2) se une con NUMBER(10), y VARCHAR2(12) con VARCHAR2(11).
+    /// La longitud y la precisión no se comparan.
     /// </summary>
-    public static bool TypesCompatible(string a, string b) => Normalize(a) == Normalize(b);
+    public static bool TypesCompatible(string a, string b) => BaseTypeOf(a) == BaseTypeOf(b);
 
-    private static string Normalize(string dataType) =>
-        new string(dataType.Where(c => !char.IsWhiteSpace(c)).ToArray()).ToUpperInvariant();
+    private static string BaseTypeOf(string dataType) =>
+        dataType.Split('(')[0].Trim().ToUpperInvariant();
 }
