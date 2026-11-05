@@ -1,0 +1,30 @@
+<div class="flex flex-col gap-2 h-full min-h-0">
+    <input class="input input-sm w-full" placeholder="Buscar tabla..." @bind="_filter" @bind:event="oninput" />
+
+    <ul class="menu menu-sm p-0 overflow-y-auto flex-1 min-h-0">
+        @foreach (var table in Filtered)
+        {
+            <li>
+                <button class="@(table == SelectedTable ? "active" : "")" @onclick="() => OnSelect.InvokeAsync(table)">
+                    <span class="opacity-60">▦</span>
+                    <span class="font-mono-sql text-xs truncate">@table</span>
+                </button>
+            </li>
+        }
+        @if (!Filtered.Any())
+        {
+            <li class="disabled"><span class="text-xs opacity-60">Sin resultados</span></li>
+        }
+    </ul>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<string> Tables { get; set; } = [];
+    [Parameter] public string SelectedTable { get; set; } = "";
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+
+    private string _filter = "";
+
+    private IEnumerable<string> Filtered =>
+        Tables.Where(t => t.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+}

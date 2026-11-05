@@ -1,0 +1,12 @@
+# Dependencias y artefactos generados
+bin/
+obj/
+**/node_modules/
+.vs/
+*.user
+
+# Secretos locales (contraseñas de prueba)
+.env
+
+# Monaco se copia desde node_modules en el build
+**/wwwroot/lib/monaco/

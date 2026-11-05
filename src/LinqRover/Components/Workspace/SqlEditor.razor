@@ -1,0 +1,93 @@
+<div class="flex flex-col gap-2 h-full min-h-0">
+    <div class="flex items-center gap-2">
+        <button class="btn btn-primary btn-sm" disabled="@Busy" @onclick="RunClickedAsync">
+            ▶ Ejecutar
+        </button>
+        <span class="text-xs opacity-60">Ctrl+Enter · Los cambios se deshacen siempre (solo lectura)</span>
+    </div>
+    <div @ref="_host" class="flex-1 min-h-0 border border-base-300 rounded-box overflow-hidden"></div>
+</div>
+
+@code {
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+    [Inject] private DatabaseProviders Providers { get; set; } = default!;
+
+    [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
+    [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    [Parameter] public IReadOnlyList<string> TableNames { get; set; } = [];
+    [Parameter] public string InitialText { get; set; } = "";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<string> OnRun { get; set; }
+
+    private ElementReference _host;
+    private DotNetObjectReference<SqlEditor>? _dotNet;
+    private string? _editorId;
+    private IReadOnlyList<string>? _sentTables;
+    private bool _initialized;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _initialized) return;
+        _initialized = true;
+
+        _dotNet = DotNetObjectReference.Create(this);
+        _editorId = await JS.InvokeAsync<string>("sqlEditor.create", _host, _dotNet, InitialText);
+        await PushTablesAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Un cambio de esquema o de tablas refresca el autocompletado.
+        if (_editorId is not null && !ReferenceEquals(TableNames, _sentTables))
+            await PushTablesAsync();
+    }
+
+    private async Task PushTablesAsync()
+    {
+        _sentTables = TableNames;
+        if (_editorId is not null)
+            await JS.InvokeVoidAsync("sqlEditor.setTables", _editorId, TableNames);
+    }
+
+    /// <summary>Pone un texto en el editor (por ejemplo, desde el historial).</summary>
+    public async Task SetTextAsync(string text)
+    {
+        if (_editorId is not null)
+            await JS.InvokeVoidAsync("sqlEditor.setValue", _editorId, text);
+    }
+
+    private async Task RunClickedAsync()
+    {
+        if (_editorId is null) return;
+        var text = await JS.InvokeAsync<string>("sqlEditor.getValue", _editorId);
+        await OnRun.InvokeAsync(text);
+    }
+
+    /// <summary>Llamado desde el editor con Ctrl+Enter.</summary>
+    [JSInvokable]
+    public Task Run(string text) => OnRun.InvokeAsync(text);
+
+    /// <summary>Columnas de una tabla para el autocompletado. Devuelve lista vacía si falla.</summary>
+    [JSInvokable]
+    public async Task<IReadOnlyList<ColumnInfo>> GetColumnsAsync(string table)
+    {
+        try
+        {
+            return await Providers.Get(Profile.Engine).GetColumnsAsync(Profile, Schema, table);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_editorId is not null)
+        {
+            try { await JS.InvokeVoidAsync("sqlEditor.dispose", _editorId); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNet?.Dispose();
+    }
+}

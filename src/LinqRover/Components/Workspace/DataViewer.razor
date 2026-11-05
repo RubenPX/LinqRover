@@ -1,0 +1,101 @@
+<div class="flex flex-col h-full min-h-0 gap-2">
+    @if (_error is not null)
+    {
+        <div role="alert" class="alert alert-error alert-soft text-sm py-2">@_error</div>
+    }
+
+    @if (_result is null && _error is null)
+    {
+        <span class="loading loading-spinner loading-sm"></span>
+    }
+    else if (_result is not null)
+    {
+        <div class="overflow-auto flex-1 min-h-0 border border-base-300 rounded-box relative">
+            @if (_loading)
+            {
+                <div class="absolute inset-0 bg-base-100/50 flex items-center justify-center z-10">
+                    <span class="loading loading-spinner"></span>
+                </div>
+            }
+            <table class="table table-xs table-pin-rows table-zebra">
+                <thead>
+                    <tr>
+                        @foreach (var header in _result.Columns)
+                        {
+                            <th class="font-mono-sql">@header</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _result.Rows)
+                    {
+                        <tr>
+                            @foreach (var cell in row)
+                            {
+                                @if (cell is null)
+                                {
+                                    <td class="font-mono-sql italic opacity-40">NULL</td>
+                                }
+                                else
+                                {
+                                    <td class="font-mono-sql whitespace-nowrap">@cell</td>
+                                }
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="flex items-center justify-between text-sm">
+            <span class="opacity-70">
+                @if (_result.TotalRows == 0)
+                {
+                    <span>Sin filas</span>
+                }
+                else
+                {
+                    <span>Filas @(_page * PageSize + 1)–@(Math.Min((_page + 1) * PageSize, _result.TotalRows)) de @_result.TotalRows</span>
+                }
+            </span>
+            <div class="join">
+                <button class="join-item btn btn-sm" disabled="@(_loading || _page == 0)" @onclick="() => GoToAsync(_page - 1)">«</button>
+                <button class="join-item btn btn-sm">Página @(_page + 1) de @TotalPages</button>
+                <button class="join-item btn btn-sm" disabled="@(_loading || _page >= TotalPages - 1)" @onclick="() => GoToAsync(_page + 1)">»</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Func<int, int, Task<PageResult>> LoadPage { get; set; } = default!;
+    [Parameter] public int PageSize { get; set; } = 30;
+
+    private PageResult? _result;
+    private int _page;
+    private bool _loading;
+    private string? _error;
+
+    private int TotalPages => _result is null ? 1 : Math.Max(1, (int)Math.Ceiling(_result.TotalRows / (double)PageSize));
+
+    protected override async Task OnInitializedAsync() => await GoToAsync(0);
+
+    private async Task GoToAsync(int page)
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _result = await LoadPage(page, PageSize);
+            _page = page;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error al leer los datos: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

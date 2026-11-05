@@ -1,0 +1,324 @@
+@page "/workspace/{ProfileId:guid}"
+@inject ProfileStore Store
+@inject DatabaseProviders Providers
+
+<div class="flex h-full gap-4 -m-4 p-4 min-h-0">
+    <section class="w-64 shrink-0 card bg-base-100 border border-base-300 min-h-0">
+        <div class="card-body p-3 min-h-0">
+            @if (_profile is null)
+            {
+                <span class="loading loading-spinner loading-sm"></span>
+            }
+            else
+            {
+                <select class="select select-sm w-full" @onchange="OnSchemaChanged">
+                    @foreach (var schema in _schemas)
+                    {
+                        <option value="@schema" selected="@(schema == _schema)">@schema</option>
+                    }
+                </select>
+                <TablesPanel Tables="_tables" SelectedTable="_selected" OnSelect="SelectTableAsync" />
+            }
+        </div>
+    </section>
+
+    <section class="flex-1 min-w-0 flex flex-col gap-3 min-h-0">
+        @if (_error is not null)
+        {
+            <div role="alert" class="alert alert-error">
+                <span>@_error</span>
+                <button class="btn btn-sm" @onclick="Retry">Reintentar</button>
+            </div>
+        }
+
+        @if (_profile is null && _error is null)
+        {
+            <span class="loading loading-spinner"></span>
+        }
+        else if (_profile is not null)
+        {
+            <div class="flex items-center gap-2">
+                <h1 class="text-lg font-bold font-mono-sql">@(_selected ?? "—")</h1>
+                <span class="badge badge-ghost badge-sm">@_profile.Name · @_profile.Engine.DisplayName()</span>
+            </div>
+
+            <div role="tablist" class="tabs tabs-box tabs-sm w-fit bg-base-100">
+                @foreach (var tab in _tabs)
+                {
+                    <button role="tab" class="tab @(_activeTab == tab.Key ? "tab-active" : "")"
+                            @onclick="() => _activeTab = tab.Key">
+                        @tab.Label
+                    </button>
+                }
+            </div>
+
+            <div class="card bg-base-100 border border-base-300 flex-1 min-h-0 overflow-hidden">
+                <div class="card-body p-3 min-h-0 h-full">
+
+                    @* Pestañas de tabla: se montan solo cuando están activas *@
+                    <div class="@(_activeTab == "sql" ? "hidden" : "h-full min-h-0 flex flex-col")">
+                        @if (_selected is not null)
+                        {
+                            @switch (_activeTab)
+                            {
+                                case "data":
+                                    <DataViewer @key="DataKey" LoadPage="LoadPageAsync" PageSize="30" />
+                                    break;
+                                case "schema":
+                                    <SchemaView TableName="@_selected" Columns="_columns" />
+                                    break;
+                                case "diagram":
+                                    <ComingSoon Title="Diagrama de tabla" Text="Relaciones FK y vista de nodos." />
+                                    break;
+                                case "builder":
+                                    <ComingSoon Title="Constructor visual" Text="Arrastra bloques para generar una consulta." />
+                                    break;
+                            }
+                        }
+                        else
+                        {
+                            <p class="opacity-60 text-sm">Este esquema no tiene tablas.</p>
+                        }
+                    </div>
+
+                    @* El editor se mantiene montado para no perder el texto al cambiar de pestaña *@
+                    <div class="@(_activeTab == "sql" ? "h-full min-h-0 flex flex-col gap-3" : "hidden")">
+                        <div class="flex-1 min-h-48 min-h-0 flex flex-col">
+                            <SqlEditor @ref="_sqlEditor" Profile="_profile" Schema="_schema" TableNames="_tables"
+                                       InitialText="_sqlText" Busy="_queryBusy" OnRun="RunQueryAsync" />
+                        </div>
+
+                        @if (_pendingSql is not null)
+                        {
+                            <div role="alert" class="alert alert-warning alert-soft text-sm py-2">
+                                <span>La consulta no parece de lectura. Se ejecutará dentro de una transacción que se deshace, pero conviene confirmarlo.</span>
+                                <button class="btn btn-sm" @onclick="ConfirmPendingAsync">Ejecutar de todos modos</button>
+                                <button class="btn btn-sm btn-ghost" @onclick="() => _pendingSql = null">Cancelar</button>
+                            </div>
+                        }
+
+                        @if (_queryError is not null)
+                        {
+                            <div role="alert" class="alert alert-error alert-soft text-sm py-2 font-mono-sql whitespace-pre-wrap">@_queryError</div>
+                        }
+                        else if (_queryStatus is not null)
+                        {
+                            <p class="text-sm opacity-70">@_queryStatus</p>
+                        }
+
+                        @if (_result is { Columns.Count: > 0 })
+                        {
+                            <div class="h-72 shrink-0 flex flex-col">
+                                <DataViewer @key="_queryKey" LoadPage="LoadResultPage" PageSize="30" />
+                            </div>
+                        }
+
+                        @if (_history.Count > 0)
+                        {
+                            <details class="dropdown text-sm">
+                                <summary class="btn btn-ghost btn-xs">Historial (@_history.Count)</summary>
+                                <ul class="dropdown-content menu bg-base-100 rounded-box z-10 w-[32rem] max-h-64 overflow-y-auto shadow p-2">
+                                    @foreach (var item in _history)
+                                    {
+                                        <li><button class="font-mono-sql text-xs truncate" @onclick="() => LoadFromHistoryAsync(item)">@item</button></li>
+                                    }
+                                </ul>
+                            </details>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private const int MaxRows = 1000;
+    private const int MaxHistory = 20;
+
+    [Parameter] public Guid ProfileId { get; set; }
+
+    private string DataKey => $"{_schema}.{_selected}";
+
+    private DbConnectionProfile? _profile;
+    private string _schema = "";
+    private List<string> _schemas = [];
+    private List<string> _tables = [];
+    private string? _selected;
+    private IReadOnlyList<ColumnInfo> _columns = [];
+    private string? _error;
+    private string _activeTab = "data";
+
+    // Consultas libres
+    private SqlEditor? _sqlEditor;
+    private string _sqlText = "";
+    private bool _queryBusy;
+    private QueryResult? _result;
+    private string _queryKey = "";
+    private string? _queryStatus;
+    private string? _queryError;
+    private string? _pendingSql;
+    private readonly List<string> _history = [];
+
+    private readonly (string Key, string Label)[] _tabs =
+    [
+        ("data", "Datos"),
+        ("sql", "SQL"),
+        ("schema", "Esquema"),
+        ("diagram", "Diagrama"),
+        ("builder", "Constructor"),
+    ];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await Retry();
+    }
+
+    private async Task Retry()
+    {
+        _error = null;
+        try
+        {
+            _profile = (await Store.GetAllAsync()).FirstOrDefault(p => p.Id == ProfileId);
+            if (_profile is null)
+            {
+                _error = "La conexión no existe. Quizá se ha eliminado.";
+                return;
+            }
+
+            var provider = Providers.Get(_profile.Engine);
+            _schemas = (await provider.GetSchemasAsync(_profile)).ToList();
+            _schema = _schemas.Contains(provider.GetDefaultSchema(_profile))
+                ? provider.GetDefaultSchema(_profile)
+                : _schemas.FirstOrDefault() ?? provider.GetDefaultSchema(_profile);
+            await LoadTablesAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudo conectar: {ex.Message}";
+        }
+    }
+
+    private async Task OnSchemaChanged(ChangeEventArgs e)
+    {
+        _schema = e.Value?.ToString() ?? _schema;
+        await LoadTablesAsync();
+    }
+
+    private async Task LoadTablesAsync()
+    {
+        if (_profile is null) return;
+        try
+        {
+            var tables = await Providers.Get(_profile.Engine).GetTablesAsync(_profile, _schema);
+            _tables = tables.Select(t => t.Name).ToList();
+            await SelectTableAsync(_tables.FirstOrDefault());
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudieron leer las tablas: {ex.Message}";
+        }
+    }
+
+    private async Task SelectTableAsync(string? table)
+    {
+        _selected = table;
+        _columns = [];
+        if (_profile is null || table is null) return;
+
+        try
+        {
+            _columns = await Providers.Get(_profile.Engine).GetColumnsAsync(_profile, _schema, table);
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudieron leer las columnas: {ex.Message}";
+        }
+    }
+
+    private Task<PageResult> LoadPageAsync(int pageIndex, int pageSize) =>
+        Providers.Get(_profile!.Engine).GetPageAsync(_profile!, _schema, _selected!, pageIndex, pageSize);
+
+    // ---- Consultas libres ----
+
+    private async Task RunQueryAsync(string text)
+    {
+        _sqlText = text;
+        _queryError = null;
+        _queryStatus = null;
+
+        var sql = text.Trim();
+        if (sql.Length == 0)
+        {
+            _queryError = "Escribe una consulta.";
+            return;
+        }
+
+        if (!SqlSafety.LooksReadOnly(sql))
+        {
+            _pendingSql = sql;
+            return;
+        }
+
+        await ExecuteAsync(sql);
+    }
+
+    private async Task ConfirmPendingAsync()
+    {
+        var sql = _pendingSql;
+        _pendingSql = null;
+        if (sql is not null)
+            await ExecuteAsync(sql);
+    }
+
+    private async Task ExecuteAsync(string sql)
+    {
+        _queryBusy = true;
+        _queryError = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var result = await Providers.Get(_profile!.Engine).ExecuteReadOnlyAsync(_profile!, sql, MaxRows, cts.Token);
+
+            _result = result;
+            _queryKey = Guid.NewGuid().ToString();
+            var ms = result.Elapsed.TotalMilliseconds.ToString("0");
+            _queryStatus = result.Columns.Count == 0
+                ? $"Sentencia ejecutada · {result.RowsAffected ?? 0} filas afectadas · {ms} ms (revertido)"
+                : $"{result.Rows.Count} filas{(result.Truncated ? $" (se muestran las primeras {MaxRows})" : "")} · {ms} ms";
+
+            Remember(sql);
+        }
+        catch (Exception ex)
+        {
+            _result = null;
+            _queryError = ex.Message;
+        }
+        finally
+        {
+            _queryBusy = false;
+        }
+    }
+
+    private void Remember(string sql)
+    {
+        _history.RemoveAll(h => h == sql);
+        _history.Insert(0, sql);
+        if (_history.Count > MaxHistory)
+            _history.RemoveRange(MaxHistory, _history.Count - MaxHistory);
+    }
+
+    private async Task LoadFromHistoryAsync(string sql)
+    {
+        _sqlText = sql;
+        if (_sqlEditor is not null)
+            await _sqlEditor.SetTextAsync(sql);
+    }
+
+    private Task<PageResult> LoadResultPage(int pageIndex, int pageSize)
+    {
+        var r = _result!;
+        var rows = r.Rows.Skip(pageIndex * pageSize).Take(pageSize).ToList();
+        return Task.FromResult(new PageResult(r.Columns, rows, r.Rows.Count, pageIndex, pageSize));
+    }
+}

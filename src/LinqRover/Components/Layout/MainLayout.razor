@@ -1,0 +1,25 @@
+@inherits LayoutComponentBase
+
+<div class="drawer lg:drawer-open h-screen bg-base-200">
+    <input id="app-drawer" type="checkbox" class="drawer-toggle" />
+
+    <div class="drawer-content flex flex-col h-screen min-w-0">
+        <header class="navbar bg-base-100 border-b border-base-300 min-h-12 h-12 px-3 gap-2">
+            <label for="app-drawer" class="btn btn-ghost btn-sm lg:hidden" aria-label="Abrir menú">
+                <span class="text-lg leading-none">☰</span>
+            </label>
+            <span class="font-semibold">LinqRover</span>
+        </header>
+
+        <main class="flex-1 overflow-auto p-4 min-h-0">
+            @Body
+        </main>
+    </div>
+
+    <div class="drawer-side z-20">
+        <label for="app-drawer" aria-label="Cerrar menú" class="drawer-overlay"></label>
+        <aside class="bg-base-100 border-r border-base-300 w-60 min-h-full">
+            <NavMenu />
+        </aside>
+    </div>
+</div>

@@ -1,0 +1,234 @@
+<div class="modal modal-open" role="dialog">
+    <div class="modal-box max-w-lg">
+        <h3 class="text-lg font-bold">@(_isEdit ? "Editar conexión" : "Nueva conexión")</h3>
+
+        <div class="grid grid-cols-2 gap-3 mt-4">
+            <label class="form-control col-span-2">
+                <span class="label-text mb-1">Nombre</span>
+                <input class="input input-sm w-full" placeholder="Mi conexión" @bind="_draft.Name" />
+            </label>
+            <label class="form-control">
+                <span class="label-text mb-1">Motor</span>
+                <select class="select select-sm w-full" @onchange="OnEngineChanged">
+                    <option value="Oracle" selected="@(_draft.Engine == DatabaseEngine.Oracle)">Oracle</option>
+                    <option value="SqlServer" selected="@(_draft.Engine == DatabaseEngine.SqlServer)">SQL Server</option>
+                </select>
+            </label>
+            <label class="form-control">
+                <span class="label-text mb-1">Puerto</span>
+                <input type="number" class="input input-sm w-full" @bind="_draft.Port" />
+            </label>
+            <label class="form-control col-span-2">
+                <span class="label-text mb-1">Host</span>
+                <input class="input input-sm w-full" placeholder="localhost" @bind="_draft.Host" />
+            </label>
+            <label class="form-control">
+                <span class="label-text mb-1">Usuario</span>
+                <input class="input input-sm w-full" @bind="_draft.User" />
+            </label>
+            <label class="form-control">
+                <span class="label-text mb-1">Contraseña</span>
+                <input type="password" class="input input-sm w-full" value="@_draft.Password" @onchange="OnPasswordChanged" />
+            </label>
+
+            <div class="form-control col-span-2">
+                <span class="label-text mb-1">@(_draft.Engine == DatabaseEngine.Oracle ? "Servicio" : "Base de datos")</span>
+                <div class="join w-full">
+                    @if (_databases is not null)
+                    {
+                        <select class="select select-sm join-item w-full" @bind="_draft.Database">
+                            <option value="">Selecciona una base de datos…</option>
+                            @foreach (var db in _databases)
+                            {
+                                <option value="@db">@db</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="input input-sm join-item w-full" @bind="_draft.Database" />
+                    }
+
+                    @if (_draft.Engine == DatabaseEngine.SqlServer)
+                    {
+                        <button class="btn btn-sm join-item" disabled="@_busy" @onclick="LoadDatabasesAsync">
+                            Cargar lista
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @if (_draft.Engine == DatabaseEngine.SqlServer)
+            {
+                <label class="flex items-start gap-2 col-span-2 cursor-pointer">
+                    <input type="checkbox" class="checkbox checkbox-sm mt-0.5" @bind="_draft.TrustServerCertificate" />
+                    <span class="text-sm">
+                        Confiar en el certificado del servidor
+                        <span class="block text-xs opacity-60">
+                            Úsalo solo con servidores de confianza (p. ej. certificado autofirmado). La conexión sigue cifrada, pero no se valida quién es el servidor.
+                        </span>
+                    </span>
+                </label>
+            }
+        </div>
+
+        @if (_error is not null)
+        {
+            <div role="alert" class="alert alert-error alert-soft text-sm mt-4 py-2">@_error</div>
+        }
+        @if (_testMessage is not null)
+        {
+            <div role="status" class="alert @(_testOk ? "alert-success" : "alert-error") alert-soft text-sm mt-4 py-2">@_testMessage</div>
+        }
+
+        <div class="modal-action">
+            <button class="btn btn-sm btn-ghost" @onclick="() => OnCancel.InvokeAsync()">Cancelar</button>
+            <button class="btn btn-sm btn-outline" disabled="@_busy" @onclick="TestAsync">
+                @if (_busy)
+                {
+                    <span class="loading loading-spinner loading-xs"></span>
+                }
+                Probar conexión
+            </button>
+            <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync">Guardar</button>
+        </div>
+    </div>
+    <div class="modal-backdrop" @onclick="() => OnCancel.InvokeAsync()"></div>
+</div>
+
+@code {
+    [Inject] private DatabaseProviders Providers { get; set; } = default!;
+    [Inject] private ProfileStore Store { get; set; } = default!;
+    [Inject] private DefaultConnectionSettings Defaults { get; set; } = default!;
+
+    /// <summary>Perfil a editar. Null para crear uno nuevo.</summary>
+    [Parameter] public DbConnectionProfile? Profile { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private ConnectionDraft _draft = new();
+    private bool _isEdit;
+    private bool _busy;
+    private string? _error;
+    private string? _testMessage;
+    private bool _testOk;
+    private List<string>? _databases;
+
+    protected override void OnParametersSet()
+    {
+        if (_draft.Id != (Profile?.Id ?? _draft.Id) || Profile is null && _isEdit)
+        {
+            _draft = Profile is null ? ConnectionDraft.FromDefaults(Defaults) : ConnectionDraft.From(Profile);
+            _isEdit = Profile is not null;
+            _databases = null;
+        }
+    }
+
+    private void OnEngineChanged(ChangeEventArgs e)
+    {
+        var engine = e.Value?.ToString() == "SqlServer" ? DatabaseEngine.SqlServer : DatabaseEngine.Oracle;
+        // Solo cambia el puerto si estaba en el valor por defecto del motor anterior.
+        if (_draft.Port == ConnectionDraft.DefaultPort(_draft.Engine))
+            _draft.Port = ConnectionDraft.DefaultPort(engine);
+        _draft.Engine = engine;
+        _databases = null;
+    }
+
+    /// <summary>Al terminar de escribir la contraseña se cargan las bases, si el motor lo permite y hay datos de conexión.</summary>
+    private async Task OnPasswordChanged(ChangeEventArgs e)
+    {
+        _draft.Password = e.Value?.ToString() ?? "";
+        if (_draft.Engine == DatabaseEngine.SqlServer && CanTryConnect())
+            await LoadDatabasesAsync();
+    }
+
+    private bool CanTryConnect() =>
+        !string.IsNullOrWhiteSpace(_draft.Host) && !string.IsNullOrWhiteSpace(_draft.User) && _draft.Port > 0;
+
+    private async Task LoadDatabasesAsync()
+    {
+        _error = null;
+        _testMessage = null;
+        if (!CanTryConnect())
+        {
+            _error = "Indica host, puerto y usuario para cargar las bases de datos.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var list = (await Providers.Get(_draft.Engine).GetDatabasesAsync(_draft.ToProfile(), cts.Token)).ToList();
+            _databases = list;
+            if (list.Count == 0)
+                _error = "El usuario no ve ninguna base de datos en este servidor.";
+        }
+        catch (Exception ex)
+        {
+            _databases = null;
+            _error = $"No se pudieron cargar las bases de datos: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task TestAsync()
+    {
+        _error = null;
+        var validation = _draft.Validate();
+        if (validation is not null)
+        {
+            _testOk = false;
+            _testMessage = validation;
+            return;
+        }
+
+        _busy = true;
+        _testMessage = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await Providers.Get(_draft.Engine).TestConnectionAsync(_draft.ToProfile(), cts.Token);
+            _testOk = true;
+            _testMessage = "Conexión correcta.";
+        }
+        catch (Exception ex)
+        {
+            _testOk = false;
+            _testMessage = $"No se pudo conectar: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _testMessage = null;
+        var validation = _draft.Validate();
+        if (validation is not null)
+        {
+            _error = validation;
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Store.SaveAsync(_draft.ToProfile());
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudo guardar: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

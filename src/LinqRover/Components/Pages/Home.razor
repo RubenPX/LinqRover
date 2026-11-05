@@ -1,0 +1,112 @@
+@page "/"
+@inject ProfileStore Store
+@inject NavigationManager Nav
+
+<PageHeader Title="Conexiones" Subtitle="Elige una conexión guardada o crea una nueva.">
+    <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ Nueva conexión</button>
+</PageHeader>
+
+@if (_loadError is not null)
+{
+    <div role="alert" class="alert alert-error mb-4">@_loadError</div>
+}
+
+@if (_profiles is null)
+{
+    <span class="loading loading-spinner"></span>
+}
+else if (_profiles.Count == 0)
+{
+    <div class="border-2 border-dashed border-base-300 rounded-box p-10 text-center">
+        <p class="font-semibold">Todavía no tienes conexiones</p>
+        <p class="text-sm opacity-60 mt-1">Crea una para empezar a explorar tus tablas.</p>
+    </div>
+}
+else
+{
+    <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
+        @foreach (var profile in _profiles)
+        {
+            <div class="card bg-base-100 shadow-sm border border-base-300">
+                <div class="card-body gap-2">
+                    <div class="flex items-center justify-between">
+                        <h2 class="card-title text-base">@profile.Name</h2>
+                        <span class="badge @(profile.Engine == DatabaseEngine.Oracle ? "badge-error" : "badge-info") badge-sm">
+                            @profile.Engine.DisplayName()
+                        </span>
+                    </div>
+                    <p class="text-sm opacity-70 font-mono-sql break-all">@profile.Host:@profile.Port / @profile.Database</p>
+                    <p class="text-sm opacity-70">Usuario: @profile.User</p>
+                    <div class="card-actions justify-end mt-2">
+                        <button class="btn btn-ghost btn-sm" @onclick="() => OpenEdit(profile)">Editar</button>
+                        <button class="btn btn-ghost btn-sm text-error" @onclick="() => DeleteAsync(profile)">Eliminar</button>
+                        <button class="btn btn-outline btn-primary btn-sm" @onclick="() => Connect(profile)">Conectar</button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (_showForm)
+{
+    <ConnectionForm Profile="_editing" OnSaved="OnFormSaved" OnCancel="CloseForm" />
+}
+
+@code {
+    private List<DbConnectionProfile>? _profiles;
+    private DbConnectionProfile? _editing;
+    private bool _showForm;
+    private string? _loadError;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _profiles = (await Store.GetAllAsync()).ToList();
+            _loadError = null;
+        }
+        catch (Exception ex)
+        {
+            _profiles ??= [];
+            _loadError = $"No se pudieron leer las conexiones: {ex.Message}";
+        }
+    }
+
+    private void OpenNew()
+    {
+        _editing = null;
+        _showForm = true;
+    }
+
+    private void OpenEdit(DbConnectionProfile profile)
+    {
+        _editing = profile;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private void Connect(DbConnectionProfile profile) => Nav.NavigateTo($"workspace/{profile.Id}");
+
+    private async Task OnFormSaved()
+    {
+        _showForm = false;
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(DbConnectionProfile profile)
+    {
+        try
+        {
+            await Store.DeleteAsync(profile.Id);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"No se pudo eliminar: {ex.Message}";
+        }
+    }
+}

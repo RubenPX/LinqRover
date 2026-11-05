@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* Escanea los componentes Razor para generar solo las clases que se usan */
+@source "../Components";
+
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+/* Ajustes de la ventana de escritorio */
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+#app {
+  height: 100%;
+}
+
+.font-mono-sql {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Cascadia Code", monospace;
+}
