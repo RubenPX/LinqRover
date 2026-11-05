@@ -27,10 +27,6 @@ public sealed class ColumnPort : PortModel
         if (other is not ColumnPort target)
             return false;
 
-        // Dos claves primarias no se relacionan entre sí.
-        if (Info.IsPrimaryKey && target.Info.IsPrimaryKey)
-            return false;
-
         if (!TypesCompatible(Info.DataType, target.Info.DataType))
             return false;
 
