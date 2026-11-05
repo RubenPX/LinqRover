@@ -58,6 +58,31 @@
                 </div>
             </div>
 
+            @if (_draft.Engine == DatabaseEngine.Oracle)
+            {
+                <div class="form-control col-span-2">
+                    <span class="label-text mb-1">Esquema por defecto</span>
+                    <div class="join w-full">
+                        @if (_schemas is not null)
+                        {
+                            <select class="select select-sm join-item w-full" @bind="_draft.DefaultSchema">
+                                @foreach (var schema in _schemas)
+                                {
+                                    <option value="@schema">@schema</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <input class="input input-sm join-item w-full" disabled placeholder="Carga los esquemas para elegir uno" />
+                        }
+                        <button class="btn btn-sm join-item" disabled="@_busy" @onclick="LoadSchemasAsync">
+                            Cargar esquemas
+                        </button>
+                    </div>
+                </div>
+            }
+
             @if (_draft.Engine == DatabaseEngine.SqlServer)
             {
                 <label class="flex items-start gap-2 col-span-2 cursor-pointer">
@@ -113,6 +138,7 @@
     private string? _testMessage;
     private bool _testOk;
     private List<string>? _databases;
+    private List<string>? _schemas;
 
     protected override void OnParametersSet()
     {
@@ -121,6 +147,7 @@
             _draft = Profile is null ? ConnectionDraft.FromDefaults(Defaults) : ConnectionDraft.From(Profile);
             _isEdit = Profile is not null;
             _databases = null;
+            _schemas = null;
         }
     }
 
@@ -132,14 +159,18 @@
             _draft.Port = ConnectionDraft.DefaultPort(engine);
         _draft.Engine = engine;
         _databases = null;
+        _schemas = null;
+        _draft.DefaultSchema = null;
     }
 
-    /// <summary>Al terminar de escribir la contraseña se cargan las bases, si el motor lo permite y hay datos de conexión.</summary>
+    /// <summary>Al terminar de escribir la contraseña se cargan las bases (SQL Server) o los esquemas (Oracle), si hay datos suficientes.</summary>
     private async Task OnPasswordChanged(ChangeEventArgs e)
     {
         _draft.Password = e.Value?.ToString() ?? "";
         if (_draft.Engine == DatabaseEngine.SqlServer && CanTryConnect())
             await LoadDatabasesAsync();
+        else if (_draft.Engine == DatabaseEngine.Oracle && CanTryConnect() && !string.IsNullOrWhiteSpace(_draft.Database))
+            await LoadSchemasAsync();
     }
 
     private bool CanTryConnect() =>
@@ -168,6 +199,51 @@
         {
             _databases = null;
             _error = $"No se pudieron cargar las bases de datos: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// Lista los esquemas de Oracle y preselecciona el del usuario (en mayúsculas), si existe.
+    /// Oracle necesita el servicio para conectar, así que se pide antes.
+    /// </summary>
+    private async Task LoadSchemasAsync()
+    {
+        _error = null;
+        _testMessage = null;
+        if (!CanTryConnect() || string.IsNullOrWhiteSpace(_draft.Database))
+        {
+            _error = "Indica host, puerto, usuario y servicio para cargar los esquemas.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var list = (await Providers.Get(_draft.Engine).GetSchemasAsync(_draft.ToProfile(), cts.Token)).ToList();
+            _schemas = list;
+
+            if (list.Count == 0)
+            {
+                _draft.DefaultSchema = null;
+                _error = "No hay esquemas con tablas visibles para este usuario.";
+                return;
+            }
+
+            // Por defecto, el esquema del propio usuario; si no aparece, el primero de la lista.
+            var own = _draft.User.Trim().ToUpperInvariant();
+            _draft.DefaultSchema = list.Contains(_draft.DefaultSchema ?? "") ? _draft.DefaultSchema
+                : list.Contains(own) ? own
+                : list[0];
+        }
+        catch (Exception ex)
+        {
+            _schemas = null;
+            _error = $"No se pudieron cargar los esquemas: {ex.Message}";
         }
         finally
         {

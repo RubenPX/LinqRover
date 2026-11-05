@@ -1,3 +1,4 @@
+using LinqRover.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -10,17 +11,19 @@ public sealed record DynamicTable(string Schema, string Name, IReadOnlyList<Dyna
 }
 
 /// <summary>
-/// DbContext de solo lectura creado en tiempo de ejecución. Cada tabla es una entidad de tipo compartido
-/// sin clave, así no hace falta generar clases. Cualquier intento de guardar cambios lanza una excepción.
+/// DbContext de solo lectura creado en tiempo de ejecución, para SQL Server u Oracle. Cada tabla es una entidad
+/// de tipo compartido sin clave, así no hace falta generar clases. Guardar cambios lanza una excepción.
 /// </summary>
 public sealed class DynamicDbContext : DbContext
 {
     private readonly IReadOnlyList<DynamicTable> _tables;
+    private readonly DatabaseEngine _engine;
 
-    public DynamicDbContext(DbContextOptions<DynamicDbContext> options, IReadOnlyList<DynamicTable> tables)
+    public DynamicDbContext(DbContextOptions<DynamicDbContext> options, IReadOnlyList<DynamicTable> tables, DatabaseEngine engine)
         : base(options)
     {
         _tables = tables;
+        _engine = engine;
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -32,19 +35,19 @@ public sealed class DynamicDbContext : DbContext
                 b.ToTable(table.Name, table.Schema);
                 b.HasNoKey();
                 foreach (var column in table.Columns)
-                    MapColumn(b, column);
+                    MapColumn(b, column, _engine);
             });
         }
     }
 
     /// <summary>
     /// Mapea una columna con su tipo CLR real. EF no sabe mapear propiedades de tipo object,
-    /// así que se llama a IndexerProperty&lt;T&gt; por reflexión con el T que corresponde al tipo SQL.
+    /// así que se llama a IndexerProperty&lt;T&gt; por reflexión con el T que corresponde al tipo del motor.
     /// Las columnas de tipos no soportados se omiten.
     /// </summary>
-    private static void MapColumn(EntityTypeBuilder<Dictionary<string, object?>> builder, DynamicColumn column)
+    private static void MapColumn(EntityTypeBuilder<Dictionary<string, object?>> builder, DynamicColumn column, DatabaseEngine engine)
     {
-        var clrType = SqlTypeMap.ToClrType(column.SqlType);
+        var clrType = SqlTypeMap.ToClrType(column.SqlType, engine);
         if (clrType is null)
             return;
 

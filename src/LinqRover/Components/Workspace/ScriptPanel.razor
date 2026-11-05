@@ -1,25 +1,45 @@
-<div class="h-full min-h-0 flex flex-col gap-2">
-    <div class="h-64 shrink-0">
-        <SqlEditor Profile="@Profile" Schema="@Schema" InitialText="@_code" Language="csharp"
-                   Busy="_busy" OnRun="RunAsync" />
+<div class="h-full min-h-0 flex gap-3">
+    <div class="flex-1 min-w-0 min-h-0 flex flex-col gap-2">
+        <div class="h-64 shrink-0">
+            <SqlEditor Profile="@Profile" Schema="@Schema" InitialText="@_code" Language="csharp"
+                       Busy="_busy" OnRun="RunAsync" />
+        </div>
+
+        @if (_error is not null)
+        {
+            <div role="alert" class="alert alert-error alert-soft text-sm py-2 shrink-0 font-mono-sql whitespace-pre-wrap">@_error</div>
+        }
+        else if (_status is not null)
+        {
+            <div class="shrink-0 text-xs opacity-70">@_status</div>
+        }
+
+        @if (_result is { Columns.Count: > 0 })
+        {
+            <div class="flex-1 min-h-0 relative">
+                <div class="absolute inset-0 flex flex-col">
+                    <DataViewer @key="_key" LoadPage="LoadPage" PageSize="30" />
+                </div>
+            </div>
+        }
     </div>
 
-    @if (_error is not null)
+    @if (Columns.Count > 0)
     {
-        <div role="alert" class="alert alert-error alert-soft text-sm py-2 shrink-0 font-mono-sql whitespace-pre-wrap">@_error</div>
-    }
-    else if (_status is not null)
-    {
-        <div class="shrink-0 text-xs opacity-70">@_status</div>
-    }
-
-    @if (_result is { Columns.Count: > 0 })
-    {
-        <div class="flex-1 min-h-0 relative">
-            <div class="absolute inset-0 flex flex-col">
-                <DataViewer @key="_key" LoadPage="LoadPage" PageSize="30" />
+        <aside class="w-56 shrink-0 min-h-0 flex flex-col border border-base-300 rounded-box bg-base-100">
+            <div class="px-3 py-2 border-b border-base-300 text-xs font-semibold">
+                Columnas de @Table <span class="opacity-60 font-normal">(@Columns.Count)</span>
             </div>
-        </div>
+            <ul class="flex-1 min-h-0 overflow-y-auto p-1 text-xs font-mono-sql">
+                @foreach (var column in Columns)
+                {
+                    <li class="flex items-center justify-between gap-2 px-2 py-0.5 rounded hover:bg-base-200" title="@column.Name : @column.DataType">
+                        <span class="truncate @(column.IsPrimaryKey ? "font-semibold" : "")">@column.Name</span>
+                        <span class="opacity-50 whitespace-nowrap">@(column.IsPrimaryKey ? "PK " : "")@column.DataType</span>
+                    </li>
+                }
+            </ul>
+        </aside>
     }
 </div>
 
@@ -28,23 +48,27 @@
 
     [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
     [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    /// <summary>Tabla seleccionada en el Workspace. Se usa para generar el script de ejemplo.</summary>
+    [Parameter] public string? Table { get; set; }
+    /// <summary>Columnas de la tabla seleccionada, para el panel lateral.</summary>
+    [Parameter] public IReadOnlyList<ColumnInfo> Columns { get; set; } = [];
 
     private const int MaxRows = 1000;
 
-    // Las tablas están en `db`, como entidades de tipo compartido: db.Set<Dictionary<string, object?>>("esquema.tabla")
-    private const string DefaultCode = """
-        db.Set<Dictionary<string, object?>>("dbo.Asignaturas")
-            .Where(r => r["nombre"] != null)
-            .Select(r => new { Curso = r["curso"], IdAsig = r["id_asig"], Nombre = r["nombre"] })
-            .Take(30)
-        """;
-
-    private readonly string _code = DefaultCode;
+    private string _code = "";
     private bool _busy;
     private QueryResult? _result;
     private string _key = "";
     private string? _status;
     private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        // Script de ejemplo: consulta sobre la tabla seleccionada (las tablas están en `db` como entidades de tipo compartido).
+        _code = string.IsNullOrEmpty(Table)
+            ? "var query = db.Set<Dictionary<string, object?>>(\"esquema.tabla\").Take(30);\n\nreturn query;"
+            : $"var query = db.Set<Dictionary<string, object?>>(\"{Schema}.{Table}\")\n    .Take(30);\n\nreturn query;";
+    }
 
     private async Task RunAsync(string code)
     {

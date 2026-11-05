@@ -68,14 +68,14 @@ public sealed class OracleDatabaseProvider : IDatabaseProvider
                               AND kc.COLUMN_NAME = c.COLUMN_NAME)
                         THEN 1 ELSE 0 END AS IS_PK
             FROM ALL_TAB_COLUMNS c
-            WHERE c.OWNER = :owner AND c.TABLE_NAME = :table
+            WHERE c.OWNER = :owner AND c.TABLE_NAME = :tname
             ORDER BY c.COLUMN_ID
             """;
 
         await using var conn = await OpenAsync(profile, ct);
         await using var cmd = new OracleCommand(sql, conn) { BindByName = true };
         cmd.Parameters.Add("owner", schema);
-        cmd.Parameters.Add("table", table);
+        cmd.Parameters.Add("tname", table);
 
         var result = new List<ColumnInfo>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -114,13 +114,13 @@ public sealed class OracleDatabaseProvider : IDatabaseProvider
         var pageSql = $"""
             SELECT * FROM (
                 SELECT t.*, ROWNUM AS RN FROM (SELECT * FROM {qualified} ORDER BY ROWID) t
-                WHERE ROWNUM <= :upper
-            ) WHERE RN > :lower
+                WHERE ROWNUM <= :hi
+            ) WHERE RN > :lo
             """;
 
         await using var cmd = new OracleCommand(pageSql, conn) { BindByName = true };
-        cmd.Parameters.Add("upper", upper);
-        cmd.Parameters.Add("lower", lower);
+        cmd.Parameters.Add("hi", upper);
+        cmd.Parameters.Add("lo", lower);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var (columns, rows) = await ReaderHelpers.ReadPageAsync(reader, pageSize, ct);
@@ -154,11 +154,12 @@ public sealed class OracleDatabaseProvider : IDatabaseProvider
 
     public async Task<IReadOnlyList<ForeignKeyRef>> GetForeignKeysAsync(DbConnectionProfile profile, string schema, string table, CancellationToken ct = default)
     {
-        // Las mismas tablas/parámetros se usan en ambos lados del OR; los nombres distintos evitan problemas con BindByName.
+        // Dos ramas, cada una filtrada por la tabla desde el principio (un OR sobre los diccionarios es muy lento):
+        // 1) FK donde la tabla es la hija; 2) FK donde la tabla es la padre (referenciada por otra).
         const string sql = """
             SELECT c.CONSTRAINT_NAME,
-                   c.OWNER AS CHILD_OWNER, c.TABLE_NAME AS CHILD_TABLE, cc.COLUMN_NAME AS CHILD_COLUMN,
-                   rc.OWNER AS PARENT_OWNER, rc.TABLE_NAME AS PARENT_TABLE, rcc.COLUMN_NAME AS PARENT_COLUMN
+                   c.OWNER, c.TABLE_NAME, cc.COLUMN_NAME,
+                   rc.OWNER, rc.TABLE_NAME, rcc.COLUMN_NAME
             FROM ALL_CONSTRAINTS c
             JOIN ALL_CONS_COLUMNS cc
               ON cc.OWNER = c.OWNER AND cc.CONSTRAINT_NAME = c.CONSTRAINT_NAME
@@ -166,18 +167,27 @@ public sealed class OracleDatabaseProvider : IDatabaseProvider
               ON rc.OWNER = c.R_OWNER AND rc.CONSTRAINT_NAME = c.R_CONSTRAINT_NAME
             JOIN ALL_CONS_COLUMNS rcc
               ON rcc.OWNER = rc.OWNER AND rcc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND rcc.POSITION = cc.POSITION
-            WHERE c.CONSTRAINT_TYPE = 'R'
-              AND ((c.OWNER = :owner1 AND c.TABLE_NAME = :table1)
-                OR (rc.OWNER = :owner2 AND rc.TABLE_NAME = :table2))
-            ORDER BY c.CONSTRAINT_NAME, cc.POSITION
+            WHERE c.CONSTRAINT_TYPE = 'R' AND c.OWNER = :owner1 AND c.TABLE_NAME = :tname1
+            UNION ALL
+            SELECT c.CONSTRAINT_NAME,
+                   c.OWNER, c.TABLE_NAME, cc.COLUMN_NAME,
+                   rc.OWNER, rc.TABLE_NAME, rcc.COLUMN_NAME
+            FROM ALL_CONSTRAINTS rc
+            JOIN ALL_CONSTRAINTS c
+              ON c.R_OWNER = rc.OWNER AND c.R_CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND c.CONSTRAINT_TYPE = 'R'
+            JOIN ALL_CONS_COLUMNS cc
+              ON cc.OWNER = c.OWNER AND cc.CONSTRAINT_NAME = c.CONSTRAINT_NAME
+            JOIN ALL_CONS_COLUMNS rcc
+              ON rcc.OWNER = rc.OWNER AND rcc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND rcc.POSITION = cc.POSITION
+            WHERE rc.CONSTRAINT_TYPE IN ('P', 'U') AND rc.OWNER = :owner2 AND rc.TABLE_NAME = :tname2
             """;
 
         await using var conn = await OpenAsync(profile, ct);
-        await using var cmd = new OracleCommand(sql, conn) { BindByName = true };
+        await using var cmd = new OracleCommand(sql, conn) { BindByName = true, CommandTimeout = 60 };
         cmd.Parameters.Add("owner1", schema);
-        cmd.Parameters.Add("table1", table);
+        cmd.Parameters.Add("tname1", table);
         cmd.Parameters.Add("owner2", schema);
-        cmd.Parameters.Add("table2", table);
+        cmd.Parameters.Add("tname2", table);
 
         var result = new List<ForeignKeyRef>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -193,7 +203,8 @@ public sealed class OracleDatabaseProvider : IDatabaseProvider
         return result;
     }
 
-    private static async Task<OracleConnection> OpenAsync(DbConnectionProfile profile, CancellationToken ct)
+    /// <summary>Cadena de conexión de Oracle para un perfil (también la usa EF Core en el prototipo de scripts).</summary>
+    public static string BuildConnectionString(DbConnectionProfile profile)
     {
         var builder = new OracleConnectionStringBuilder
         {
@@ -201,8 +212,12 @@ public sealed class OracleDatabaseProvider : IDatabaseProvider
             UserID = profile.User,
             Password = profile.Password,
         };
+        return builder.ConnectionString;
+    }
 
-        var conn = new OracleConnection(builder.ConnectionString);
+    private static async Task<OracleConnection> OpenAsync(DbConnectionProfile profile, CancellationToken ct)
+    {
+        var conn = new OracleConnection(BuildConnectionString(profile));
         try
         {
             await conn.OpenAsync(ct);
