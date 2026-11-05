@@ -20,6 +20,8 @@
     [Parameter] public EventCallback<string> OnRun { get; set; }
     /// <summary>Lenguaje del editor de Monaco: "sql" (por defecto) o "csharp" para el prototipo de scripts.</summary>
     [Parameter] public string Language { get; set; } = "sql";
+    /// <summary>Sugerencias de C# (Roslyn) para el texto y la posición del cursor. Si no se indica, se usan las heurísticas.</summary>
+    [Parameter] public Func<string, int, Task<IReadOnlyList<CompletionSuggestion>>>? Completer { get; set; }
 
     private ElementReference _host;
     private DotNetObjectReference<SqlEditor>? _dotNet;
@@ -68,6 +70,22 @@
     /// <summary>Llamado desde el editor con Ctrl+Enter.</summary>
     [JSInvokable]
     public Task Run(string text) => OnRun.InvokeAsync(text);
+
+    /// <summary>Sugerencias de Roslyn para el autocompletado de C#. Lista vacía si no hay o si falla.</summary>
+    [JSInvokable]
+    public async Task<IReadOnlyList<CompletionSuggestion>> Complete(string text, int offset)
+    {
+        if (Completer is null)
+            return [];
+        try
+        {
+            return await Completer(text, offset);
+        }
+        catch
+        {
+            return [];
+        }
+    }
 
     /// <summary>Columnas de una tabla para el autocompletado. Devuelve lista vacía si falla.</summary>
     [JSInvokable]

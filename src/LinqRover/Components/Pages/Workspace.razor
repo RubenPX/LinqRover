@@ -84,7 +84,7 @@
 
                     @* Prototipo: scripts C# con EF Core sobre la conexión *@
                     <div class="@(_activeTab == "script" ? "h-full min-h-0 flex flex-col" : "hidden")">
-                        <ScriptPanel @key="DataKey" Profile="@_profile" Schema="@_schema" Table="@_selected" Columns="@_columns" />
+                        <ScriptPanel @key="DataKey" Profile="@_profile" Schema="@_schema" TableNames="@_tables" Table="@_selected" Columns="@_columns" />
                     </div>
 
                     @* El editor se mantiene montado para no perder el texto al cambiar de pestaña *@

@@ -1,9 +1,24 @@
 <div class="h-full min-h-0 flex gap-3">
     <div class="flex-1 min-w-0 min-h-0 flex flex-col gap-2">
-        <div class="h-64 shrink-0">
-            <SqlEditor Profile="@Profile" Schema="@Schema" InitialText="@_code" Language="csharp"
-                       Busy="_busy" OnRun="RunAsync" />
+        <div class="@(_result is { Columns.Count: > 0 } ? "h-64 shrink-0" : "flex-1 min-h-0 flex flex-col")">
+            <SqlEditor Profile="@Profile" Schema="@Schema" TableNames="@TableNames" InitialText="@_code" Language="csharp"
+                       Busy="_busy" OnRun="RunAsync" Completer="@CompleteAsync" />
         </div>
+
+        @switch (_completionState)
+        {
+            case CompletionState.Preparing:
+                <div class="shrink-0 flex items-center gap-1 text-xs opacity-70">
+                    <span class="loading loading-spinner loading-xs"></span>
+                    Preparando el autocompletado (Roslyn)…
+                </div>
+                break;
+            case CompletionState.Failed:
+                <div class="shrink-0 text-xs text-warning" title="@_completionError">
+                    Autocompletado básico: no se pudo preparar Roslyn.
+                </div>
+                break;
+        }
 
         @if (_error is not null)
         {
@@ -48,6 +63,8 @@
 
     [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
     [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    /// <summary>Nombres de las tablas del esquema, para el autocompletado de db.</summary>
+    [Parameter] public IReadOnlyList<string> TableNames { get; set; } = [];
     /// <summary>Tabla seleccionada en el Workspace. Se usa para generar el script de ejemplo.</summary>
     [Parameter] public string? Table { get; set; }
     /// <summary>Columnas de la tabla seleccionada, para el panel lateral.</summary>
@@ -62,12 +79,42 @@
     private string? _status;
     private string? _error;
 
+    private enum CompletionState { Preparing, Ready, Failed }
+
+    private CompletionState _completionState = CompletionState.Preparing;
+    private string? _completionError;
+    private string? _preparedKey;
+
     protected override void OnParametersSet()
     {
         // Script de ejemplo: consulta sobre la tabla seleccionada (las tablas están en `db` como entidades de tipo compartido).
         _code = string.IsNullOrEmpty(Table)
-            ? "var query = db.Set<Dictionary<string, object?>>(\"esquema.tabla\").Take(30);\n\nreturn query;"
-            : $"var query = db.Set<Dictionary<string, object?>>(\"{Schema}.{Table}\")\n    .Take(30);\n\nreturn query;";
+            ? "// Selecciona una tabla en el Workspace para ver sus clases\nreturn db;"
+            : $"var query = db.{ClassGenerator.ContextMemberName(Table)}\n    .Take(30);\n\nreturn query;";
+
+        // Se prepara al abrir la pestaña (no al primer Ctrl+Espacio) para avisar al usuario mientras tanto.
+        var key = $"{Profile.Id}|{Schema}";
+        if (key != _preparedKey)
+        {
+            _preparedKey = key;
+            _ = PrepareCompletionAsync();
+        }
+    }
+
+    private async Task PrepareCompletionAsync()
+    {
+        _completionState = CompletionState.Preparing;
+        try
+        {
+            await new Services.ScriptService(Providers).PrepareCompletionAsync(Profile, Schema);
+            _completionState = CompletionState.Ready;
+        }
+        catch (Exception ex)
+        {
+            _completionState = CompletionState.Failed;
+            _completionError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task RunAsync(string code)
@@ -95,6 +142,9 @@
             _busy = false;
         }
     }
+
+    private Task<IReadOnlyList<CompletionSuggestion>> CompleteAsync(string code, int offset) =>
+        new Services.ScriptService(Providers).CompleteAsync(Profile, Schema, code, offset);
 
     private Task<PageResult> LoadPage(int pageIndex, int pageSize)
     {
