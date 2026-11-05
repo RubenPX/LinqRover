@@ -4,7 +4,7 @@
     <ul class="menu menu-sm p-0 w-full flex-nowrap overflow-y-auto flex-1 min-h-0">
         @foreach (var table in Filtered)
         {
-            <li>
+            <li data-table="@table" onpointerdown="lrDrag.down(event)">
                 <button class="@(table == SelectedTable ? "active" : "")" @onclick="() => OnSelect.InvokeAsync(table)">
                     <span class="opacity-60">▦</span>
                     <span class="font-mono-sql text-xs truncate">@table</span>

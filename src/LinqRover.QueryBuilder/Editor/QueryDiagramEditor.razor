@@ -1,0 +1,155 @@
+<div class="h-full min-h-0 flex flex-col gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+        <select class="select select-sm w-56" @bind="_tableToAdd">
+            <option value="">Elige una tabla…</option>
+            @foreach (var table in Tables)
+            {
+                <option value="@table">@table</option>
+            }
+        </select>
+        <button class="btn btn-sm" disabled="@string.IsNullOrEmpty(_tableToAdd)" @onclick="AddTableAsync">Añadir tabla</button>
+        <button class="btn btn-ghost btn-sm" @onclick="DeleteSelected">Eliminar selección</button>
+        <span class="text-xs opacity-60">Arrastra una tabla desde la lista o desde el selector; arrastra de una columna a otra para relacionarlas.</span>
+        @if (_error is not null)
+        {
+            <span class="text-xs text-error">@_error</span>
+        }
+    </div>
+
+    <div @ref="_zone" class="flex-1 min-h-0 border border-base-300 rounded-box overflow-hidden relative">
+        <CascadingValue Value="_diagram">
+            <DiagramCanvas Class="h-full w-full" />
+        </CascadingValue>
+    </div>
+
+    <div class="max-h-28 overflow-y-auto text-xs font-mono-sql">
+        @if (!Joins.Any())
+        {
+            <span class="opacity-60">Sin relaciones.</span>
+        }
+        @foreach (var join in Joins)
+        {
+            <div>@join</div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>Tablas que se pueden añadir al lienzo.</summary>
+    [Parameter] public IReadOnlyList<string> Tables { get; set; } = [];
+    /// <summary>Esquema de las tablas.</summary>
+    [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    /// <summary>Carga las columnas de una tabla del esquema.</summary>
+    [Parameter, EditorRequired] public Func<string, Task<IReadOnlyList<ColumnInfo>>> LoadColumns { get; set; } = default!;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private BlazorDiagram _diagram = default!;
+    private ElementReference _zone;
+    private DotNetObjectReference<QueryDiagramEditor>? _dotNet;
+    private string _tableToAdd = "";
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        var options = new BlazorDiagramOptions { AllowMultiSelection = false };
+        // Los enlaces se crean arrastrando entre puertos con el estilo por defecto de la librería.
+        _diagram = new BlazorDiagram(options);
+
+        _diagram.RegisterComponent<TableNodeModel, TableNode>();
+        _diagram.Links.Added += OnLinkAdded;
+        _diagram.Links.Removed += _ => InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // La zona recibe las tablas que se suelten desde la lista (ver js/drag-drop.js).
+        _dotNet = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("lrDrag.register", _zone, _dotNet);
+    }
+
+    private void OnLinkAdded(BaseLinkModel link)
+    {
+        // Al conectar el destino se actualiza la lista de relaciones.
+        link.TargetAttached += _ => InvokeAsync(StateHasChanged);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task AddTableAsync()
+    {
+        if (string.IsNullOrEmpty(_tableToAdd)) return;
+        var index = _diagram.Nodes.Count();
+        await AddTableAtAsync(_tableToAdd, new Point(40 + (index % 3) * 280, 40 + (index / 3) * 320));
+    }
+
+    /// <summary>Llamado desde js/drag-drop.js al soltar una tabla sobre la zona del editor.</summary>
+    [JSInvokable]
+    public async Task OnTableDropped(string table, double clientX, double clientY)
+    {
+        // La esquina superior izquierda del nodo queda cerca del puntero.
+        var pointer = _diagram.GetRelativeMousePoint(clientX, clientY);
+        await AddTableAtAsync(table, new Point(pointer.X - 20, pointer.Y - 10));
+    }
+
+    private async Task AddTableAtAsync(string table, Point position)
+    {
+        try
+        {
+            var columns = await LoadColumns(table);
+            _diagram.Nodes.Add(new TableNodeModel(position, Schema, table, columns));
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void DeleteSelected()
+    {
+        foreach (var model in _diagram.GetSelectedModels().ToList())
+        {
+            if (model is TableNodeModel node)
+            {
+                // Antes de quitar el nodo, se quitan los enlaces que llegan a sus puertos.
+                foreach (var link in _diagram.Links.Where(l => IsAttachedTo(l, node)).ToList())
+                    _diagram.Links.Remove(link);
+                _diagram.Nodes.Remove(node);
+            }
+            else if (model is BaseLinkModel link)
+            {
+                _diagram.Links.Remove(link);
+            }
+        }
+    }
+
+    private static bool IsAttachedTo(BaseLinkModel link, NodeModel node) =>
+        (link.Source?.Model as PortModel)?.Parent == node || (link.Target?.Model as PortModel)?.Parent == node;
+
+    /// <summary>Condiciones de unión de los enlaces entre columnas, tipo «TABLA.COL = OTRA.COL».</summary>
+    private IEnumerable<string> Joins =>
+        _diagram.Links
+            .Where(l => l.Source?.Model is ColumnPort && l.Target?.Model is ColumnPort)
+            .Select(l =>
+            {
+                var source = (ColumnPort)l.Source!.Model;
+                var target = (ColumnPort)l.Target!.Model;
+                return $"{TableOf(source)}.{source.Column} = {TableOf(target)}.{target.Column}";
+            });
+
+    private static string TableOf(ColumnPort port) =>
+        (port.Parent as TableNodeModel)?.Table ?? "?";
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("lrDrag.unregister", _zone);
+        }
+        catch (JSDisconnectedException) { }
+        _dotNet?.Dispose();
+    }
+}
