@@ -84,8 +84,16 @@ public static class ScriptRunner
     }
 
     /// <summary>Materializa el valor devuelto por el script como mucho hasta <paramref name="take"/> elementos.</summary>
-    private static async Task<List<object?>> ToListAsync(object? value, int take, CancellationToken ct)
+    internal static async Task<List<object?>> ToListAsync(object? value, int take, CancellationToken ct)
     {
+        // Si el script devuelve una tarea (p. ej. ToListAsync() sin await), se espera aquí.
+        // Nunca se lee Task.Result sin esperar: bloquearía el hilo y provocaría un interbloqueo.
+        while (value is Task task)
+        {
+            await task.ConfigureAwait(false);
+            value = task.GetType().GetProperty("Result")?.GetValue(task);
+        }
+
         if (value is null)
             return [];
 
@@ -122,7 +130,7 @@ public static class ScriptRunner
     }
 
     /// <summary>Convierte elementos sueltos en filas: diccionarios, objetos (propiedades) o valores simples.</summary>
-    private static (List<string> Columns, List<string?[]> Rows) ToGrid(List<object?> items)
+    internal static (List<string> Columns, List<string?[]> Rows) ToGrid(List<object?> items)
     {
         var records = items.Select(ToRecord).ToList();
 

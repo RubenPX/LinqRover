@@ -1,12 +1,21 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using LinqRover.Core.Models;
 using LinqRover.Core.Providers;
 using LinqRover.Core.Scripting;
 
 namespace LinqRover.Services;
 
-/// <summary>Lee las tablas y columnas del esquema y ejecuta un script de EF Core sobre la conexión.</summary>
+/// <summary>
+/// Lee las tablas y columnas del esquema, genera y compila sus clases (una vez por esquema) y ejecuta el script
+/// contra el contexto tipado.
+/// </summary>
 public sealed class ScriptService(DatabaseProviders providers)
 {
+    // Modelos compilados. Se reutilizan mientras el esquema no cambie.
+    private static readonly ConcurrentDictionary<string, CompiledModel> Models = new();
+
     public async Task<QueryResult> RunAsync(
         DbConnectionProfile profile,
         string schema,
@@ -23,6 +32,8 @@ public sealed class ScriptService(DatabaseProviders providers)
                 columns.Select(c => new DynamicColumn(c.Name, c.DataType)).ToList()));
         }
 
+        var model = GetOrCompile(profile, tables);
+
         var connectionString = profile.Engine switch
         {
             DatabaseEngine.SqlServer => SqlServerDatabaseProvider.BuildConnectionString(profile),
@@ -30,6 +41,24 @@ public sealed class ScriptService(DatabaseProviders providers)
             _ => throw new NotSupportedException($"Motor no soportado para scripts: {profile.Engine}"),
         };
 
-        return await ScriptRunner.ExecuteAsync(profile.Engine, connectionString, tables, code, maxRows, ct);
+        return await TypedScriptRunner.ExecuteAsync(profile.Engine, connectionString, model, code, maxRows, ct);
+    }
+
+    private static CompiledModel GetOrCompile(DbConnectionProfile profile, IReadOnlyList<DynamicTable> tables)
+    {
+        // La clave incluye el perfil y la estructura de las tablas: si cambia una columna, se vuelve a compilar.
+        var structure = string.Join("|", tables.Select(t =>
+            t.Key + ":" + string.Join(",", t.Columns.Select(c => c.Name + "=" + c.SqlType))));
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(profile.Id + "|" + profile.Engine + "|" + structure)));
+
+        if (Models.TryGetValue(key, out var cached))
+            return cached;
+
+        if (Models.Count > 20)
+            Models.Clear(); // límite simple para no acumular ensamblados
+
+        var model = TypedScriptRunner.Compile(profile.Engine, tables);
+        Models[key] = model;
+        return model;
     }
 }

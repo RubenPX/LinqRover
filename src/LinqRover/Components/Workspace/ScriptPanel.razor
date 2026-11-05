@@ -1,7 +1,7 @@
 <div class="h-full min-h-0 flex gap-3">
     <div class="flex-1 min-w-0 min-h-0 flex flex-col gap-2">
         <div class="h-64 shrink-0">
-            <SqlEditor Profile="@Profile" Schema="@Schema" InitialText="@_code" Language="csharp"
+            <SqlEditor Profile="@Profile" Schema="@Schema" TableNames="@TableNames" InitialText="@_code" Language="csharp"
                        Busy="_busy" OnRun="RunAsync" />
         </div>
 
@@ -48,6 +48,8 @@
 
     [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
     [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    /// <summary>Nombres de las tablas del esquema, para el autocompletado de db.</summary>
+    [Parameter] public IReadOnlyList<string> TableNames { get; set; } = [];
     /// <summary>Tabla seleccionada en el Workspace. Se usa para generar el script de ejemplo.</summary>
     [Parameter] public string? Table { get; set; }
     /// <summary>Columnas de la tabla seleccionada, para el panel lateral.</summary>
@@ -66,8 +68,8 @@
     {
         // Script de ejemplo: consulta sobre la tabla seleccionada (las tablas están en `db` como entidades de tipo compartido).
         _code = string.IsNullOrEmpty(Table)
-            ? "var query = db.Set<Dictionary<string, object?>>(\"esquema.tabla\").Take(30);\n\nreturn query;"
-            : $"var query = db.Set<Dictionary<string, object?>>(\"{Schema}.{Table}\")\n    .Take(30);\n\nreturn query;";
+            ? "// Selecciona una tabla en el Workspace para ver sus clases\nreturn db;"
+            : $"var query = db.{ClassGenerator.ContextMemberName(Table)}\n    .Take(30);\n\nreturn query;";
     }
 
     private async Task RunAsync(string code)

@@ -176,12 +176,11 @@ window.sqlEditor = (function () {
                     return { suggestions };
                 }
 
-                // 3) db. → Set<...>
+                // 3) db. → tablas del esquema (cada una es un DbSet del contexto generado)
                 if (/\bdb\.\w*$/.test(line)) {
-                    suggestions.push({
-                        label: "Set", kind: K.Method, detail: "tabla por nombre",
-                        insertText: 'Set<Dictionary<string, object?>>("$1")', insertTextRules: SNIPPET, range: wordRange,
-                    });
+                    for (const t of ctx.tables) {
+                        suggestions.push({ label: t, kind: K.Property, detail: "tabla (DbSet)", insertText: t, range: wordRange });
+                    }
                     return { suggestions };
                 }
 
