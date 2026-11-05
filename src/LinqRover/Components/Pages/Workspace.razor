@@ -17,7 +17,7 @@
                         <option value="@schema" selected="@(schema == _schema)">@schema</option>
                     }
                 </select>
-                <TablesPanel Tables="_tables" SelectedTable="_selected" OnSelect="SelectTableAsync" />
+                <TablesPanel Tables="@_tables" SelectedTable="@_selected" OnSelect="SelectTableAsync" />
             }
         </div>
     </section>
@@ -65,10 +65,11 @@
                                     <DataViewer @key="DataKey" LoadPage="LoadPageAsync" PageSize="30" />
                                     break;
                                 case "schema":
-                                    <SchemaView TableName="@_selected" Columns="_columns" />
+                                    <SchemaView TableName="@_selected" Columns="@_columns" />
                                     break;
                                 case "diagram":
-                                    <ComingSoon Title="Diagrama de tabla" Text="Relaciones FK y vista de nodos." />
+                                    <TableDiagram @key="DataKey" Profile="@_profile" Schema="@_schema" Table="@_selected"
+                                                  OnSelect="SelectRelatedAsync" />
                                     break;
                                 case "builder":
                                     <ComingSoon Title="Constructor visual" Text="Arrastra bloques para generar una consulta." />
@@ -84,8 +85,8 @@
                     @* El editor se mantiene montado para no perder el texto al cambiar de pestaña *@
                     <div class="@(_activeTab == "sql" ? "h-full min-h-0 flex flex-col gap-3" : "hidden")">
                         <div class="flex-1 min-h-48 min-h-0 flex flex-col">
-                            <SqlEditor @ref="_sqlEditor" Profile="_profile" Schema="_schema" TableNames="_tables"
-                                       InitialText="_sqlText" Busy="_queryBusy" OnRun="RunQueryAsync" />
+                            <SqlEditor @ref="_sqlEditor" Profile="@_profile" Schema="@_schema" TableNames="@_tables"
+                                       InitialText="@_sqlText" Busy="@_queryBusy" OnRun="RunQueryAsync" />
                         </div>
 
                         @if (_pendingSql is not null)
@@ -109,7 +110,7 @@
                         @if (_result is { Columns.Count: > 0 })
                         {
                             <div class="h-72 shrink-0 flex flex-col">
-                                <DataViewer @key="_queryKey" LoadPage="LoadResultPage" PageSize="30" />
+                                <DataViewer @key="@_queryKey" LoadPage="LoadResultPage" PageSize="30" />
                             </div>
                         }
 
@@ -234,6 +235,17 @@
         {
             _error = $"No se pudieron leer las columnas: {ex.Message}";
         }
+    }
+
+    /// <summary>Abre una tabla vecina del diagrama. Si está en otro esquema, cambia también el esquema.</summary>
+    private async Task SelectRelatedAsync(TableInfo table)
+    {
+        if (table.Schema != _schema)
+        {
+            _schema = table.Schema;
+            await LoadTablesAsync();
+        }
+        await SelectTableAsync(table.Name);
     }
 
     private Task<PageResult> LoadPageAsync(int pageIndex, int pageSize) =>

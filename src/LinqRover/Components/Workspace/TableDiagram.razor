@@ -1,0 +1,166 @@
+<div class="relative h-full min-h-0 overflow-auto">
+    @if (_error is not null)
+    {
+        <div role="alert" class="alert alert-error alert-soft text-sm py-2">@_error</div>
+    }
+    else if (_layout is null)
+    {
+        <span class="loading loading-spinner loading-sm"></span>
+    }
+    else
+    {
+        <svg width="@Fmt(_layout.Width)" height="@Fmt(_layout.Height)" class="font-mono-sql select-none">
+            <defs>
+                <marker id="@_markerId" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                        orient="auto-start-reverse">
+                    <path d="M0,0 L10,5 L0,10 z" style="fill: var(--color-base-content)" opacity="0.55" />
+                </marker>
+            </defs>
+
+            @foreach (var edge in _layout.Edges)
+            {
+                <path d="@edge.Path" fill="none" stroke="var(--color-base-content)" stroke-opacity="0.45" stroke-width="1.5"
+                      marker-end="@(edge.ArrowAtEnd ? $"url(#{_markerId})" : null)"
+                      marker-start="@(!edge.ArrowAtEnd ? $"url(#{_markerId})" : null)" />
+                @if (edge.Label is not null)
+                {
+                    @Label(edge.LabelX, edge.LabelY - 4, edge.Label)
+                }
+            }
+
+            @foreach (var node in _layout.Nodes)
+            {
+                <g class="@(node.IsCenter ? "" : "cursor-pointer hover:opacity-80")" @onclick="() => SelectNodeAsync(node)">
+                    <rect x="@Fmt(node.X)" y="@Fmt(node.Y)" width="@Fmt(node.Width)" height="@Fmt(node.Height)" rx="8"
+                          style="fill: var(--color-base-100); stroke: @(node.IsCenter ? "var(--color-primary)" : "var(--color-base-300)")"
+                          stroke-width="@(node.IsCenter ? 2 : 1)" />
+                    <rect x="@Fmt(node.X)" y="@Fmt(node.Y)" width="@Fmt(node.Width)" height="@Fmt(DiagramLayout.HeaderHeight)" rx="8"
+                          style="fill: @(node.IsCenter ? "var(--color-primary)" : "var(--color-base-200)")" />
+                    @Cell(node.X + 10, node.Y + DiagramLayout.HeaderHeight / 2 + 4, node.Title, 12, "start",
+                        node.IsCenter ? "var(--color-primary-content)" : "var(--color-base-content)", 1, "600")
+
+                    @for (var i = 0; i < node.Columns.Count; i++)
+                    {
+                        var col = node.Columns[i];
+                        var rowY = node.Y + DiagramLayout.HeaderHeight + i * DiagramLayout.RowHeight + DiagramLayout.RowHeight / 2 + 4;
+                        @Cell(node.X + 10, rowY, Shorten(col.Name, 24), 11, "start", "var(--color-base-content)", 1, "400")
+                        @Cell(node.X + node.Width - 10, rowY, Badge(col), 10, "end", "var(--color-base-content)", 0.6, "400")
+                    }
+                    @if (node.HiddenColumns > 0)
+                    {
+                        @Cell(node.X + 10, node.Y + DiagramLayout.HeaderHeight + node.Columns.Count * DiagramLayout.RowHeight + DiagramLayout.RowHeight / 2 + 4,
+                            $"… {node.HiddenColumns} más", 10, "start", "var(--color-base-content)", 0.6, "400")
+                    }
+                </g>
+            }
+        </svg>
+
+        @if (_layout.HiddenLeft > 0 || _layout.HiddenRight > 0)
+        {
+            <p class="text-xs opacity-60 mt-2">
+                No se muestran @_layout.HiddenLeft tablas referenciadas y @_layout.HiddenRight tablas que referencian a esta.
+            </p>
+        }
+    }
+</div>
+
+@code {
+    [Inject] private DatabaseProviders Providers { get; set; } = default!;
+
+    [Parameter, EditorRequired] public DbConnectionProfile Profile { get; set; } = default!;
+    [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    [Parameter, EditorRequired] public string Table { get; set; } = "";
+    /// <summary>Se llama al pulsar una tabla vecina para abrirla como nueva tabla central.</summary>
+    [Parameter] public EventCallback<TableInfo> OnSelect { get; set; }
+
+    private readonly string _markerId = "arrow-" + Guid.NewGuid().ToString("N")[..8];
+    private readonly Dictionary<string, IReadOnlyList<ColumnInfo>> _columnCache = [];
+    private DiagramLayoutResult? _layout;
+    private string? _error;
+    private string? _loadedKey;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{Schema}.{Table}";
+        if (key == _loadedKey) return;
+        _loadedKey = key;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _layout = null;
+        try
+        {
+            var provider = Providers.Get(Profile.Engine);
+            var center = new TableInfo(Schema, Table);
+            var refs = await provider.GetForeignKeysAsync(Profile, Schema, Table);
+
+            // Columnas de la central y de todas las vecinas (cacheadas por esquema.tabla).
+            var tables = refs.SelectMany(r => new[] { r.Child, r.Parent }).DistinctBy(DiagramLayout.KeyOf).ToList();
+            if (!tables.Any(t => DiagramLayout.KeyOf(t) == DiagramLayout.KeyOf(center)))
+                tables.Add(center);
+
+            var columns = new Dictionary<string, IReadOnlyList<ColumnInfo>>();
+            foreach (var t in tables)
+                columns[DiagramLayout.KeyOf(t)] = await ColumnsAsync(provider, t);
+
+            _layout = DiagramLayout.Build(center, refs, columns);
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudo cargar el diagrama: {ex.Message}";
+        }
+    }
+
+    private async Task<IReadOnlyList<ColumnInfo>> ColumnsAsync(IDatabaseProvider provider, TableInfo t)
+    {
+        var key = DiagramLayout.KeyOf(t);
+        if (!_columnCache.TryGetValue(key, out var cols))
+        {
+            cols = await provider.GetColumnsAsync(Profile, t.Schema, t.Name);
+            _columnCache[key] = cols;
+        }
+        return cols;
+    }
+
+    private Task SelectNodeAsync(DiagramNode node) =>
+        node.IsCenter ? Task.CompletedTask : OnSelect.InvokeAsync(node.Table);
+
+    /// <summary>
+    /// Texto SVG. Se construye con RenderTreeBuilder porque Razor no admite atributos en la etiqueta &lt;text&gt;.
+    /// </summary>
+    private RenderFragment Cell(double x, double y, string content, double size, string anchor, string fill, double opacity, string weight) =>
+        builder =>
+        {
+            var seq = 0;
+            builder.OpenElement(seq++, "text");
+            builder.AddAttribute(seq++, "x", Fmt(x));
+            builder.AddAttribute(seq++, "y", Fmt(y));
+            builder.AddAttribute(seq++, "font-size", Fmt(size));
+            builder.AddAttribute(seq++, "text-anchor", anchor);
+            builder.AddAttribute(seq++, "font-weight", weight);
+            builder.AddAttribute(seq++, "opacity", Fmt(opacity));
+            builder.AddAttribute(seq++, "style", $"fill: {fill}");
+            builder.AddContent(seq++, content);
+            builder.CloseElement();
+        };
+
+    private RenderFragment Label(double x, double y, string content) =>
+        Cell(x, y, content, 10, "middle", "var(--color-base-content)", 0.6, "400");
+
+    private static string Fmt(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string Shorten(string text, int max) =>
+        text.Length <= max ? text : text[..(max - 1)] + "…";
+
+    private static string Badge(DiagramColumn c)
+    {
+        var parts = new List<string>();
+        if (c.IsPk) parts.Add("PK");
+        if (c.IsFk) parts.Add("FK");
+        if (c.IsRef) parts.Add("REF");
+        return parts.Count > 0 ? string.Join(" ", parts) : c.DataType;
+    }
+}

@@ -189,6 +189,44 @@ public sealed class SqlServerDatabaseProvider : IDatabaseProvider
         return result;
     }
 
+    public async Task<IReadOnlyList<ForeignKeyRef>> GetForeignKeysAsync(DbConnectionProfile profile, string schema, string table, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT fk.name,
+                   ps.name, pt.name, pc.name,
+                   rs.name, rt.name, rc.name
+            FROM sys.foreign_keys fk
+            JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+            JOIN sys.tables pt ON pt.object_id = fk.parent_object_id
+            JOIN sys.schemas ps ON ps.schema_id = pt.schema_id
+            JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+            JOIN sys.tables rt ON rt.object_id = fk.referenced_object_id
+            JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+            JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+            WHERE (ps.name = @schema AND pt.name = @table)
+               OR (rs.name = @schema AND rt.name = @table)
+            ORDER BY fk.name, fkc.constraint_column_id
+            """;
+
+        await using var conn = await OpenAsync(profile, ct);
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@schema", schema);
+        cmd.Parameters.AddWithValue("@table", table);
+
+        var result = new List<ForeignKeyRef>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            result.Add(new ForeignKeyRef(
+                ReaderHelpers.Str(reader, 0),
+                new TableInfo(ReaderHelpers.Str(reader, 1), ReaderHelpers.Str(reader, 2)),
+                ReaderHelpers.Str(reader, 3),
+                new TableInfo(ReaderHelpers.Str(reader, 4), ReaderHelpers.Str(reader, 5)),
+                ReaderHelpers.Str(reader, 6)));
+        }
+        return result;
+    }
+
     private static async Task<SqlConnection> OpenAsync(DbConnectionProfile profile, CancellationToken ct, bool useDatabase = true)
     {
         var builder = new SqlConnectionStringBuilder

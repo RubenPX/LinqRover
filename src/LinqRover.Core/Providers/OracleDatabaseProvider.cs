@@ -152,6 +152,47 @@ public sealed class OracleDatabaseProvider : IDatabaseProvider
         return result;
     }
 
+    public async Task<IReadOnlyList<ForeignKeyRef>> GetForeignKeysAsync(DbConnectionProfile profile, string schema, string table, CancellationToken ct = default)
+    {
+        // Las mismas tablas/parámetros se usan en ambos lados del OR; los nombres distintos evitan problemas con BindByName.
+        const string sql = """
+            SELECT c.CONSTRAINT_NAME,
+                   c.OWNER AS CHILD_OWNER, c.TABLE_NAME AS CHILD_TABLE, cc.COLUMN_NAME AS CHILD_COLUMN,
+                   rc.OWNER AS PARENT_OWNER, rc.TABLE_NAME AS PARENT_TABLE, rcc.COLUMN_NAME AS PARENT_COLUMN
+            FROM ALL_CONSTRAINTS c
+            JOIN ALL_CONS_COLUMNS cc
+              ON cc.OWNER = c.OWNER AND cc.CONSTRAINT_NAME = c.CONSTRAINT_NAME
+            JOIN ALL_CONSTRAINTS rc
+              ON rc.OWNER = c.R_OWNER AND rc.CONSTRAINT_NAME = c.R_CONSTRAINT_NAME
+            JOIN ALL_CONS_COLUMNS rcc
+              ON rcc.OWNER = rc.OWNER AND rcc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND rcc.POSITION = cc.POSITION
+            WHERE c.CONSTRAINT_TYPE = 'R'
+              AND ((c.OWNER = :owner1 AND c.TABLE_NAME = :table1)
+                OR (rc.OWNER = :owner2 AND rc.TABLE_NAME = :table2))
+            ORDER BY c.CONSTRAINT_NAME, cc.POSITION
+            """;
+
+        await using var conn = await OpenAsync(profile, ct);
+        await using var cmd = new OracleCommand(sql, conn) { BindByName = true };
+        cmd.Parameters.Add("owner1", schema);
+        cmd.Parameters.Add("table1", table);
+        cmd.Parameters.Add("owner2", schema);
+        cmd.Parameters.Add("table2", table);
+
+        var result = new List<ForeignKeyRef>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            result.Add(new ForeignKeyRef(
+                ReaderHelpers.Str(reader, 0),
+                new TableInfo(ReaderHelpers.Str(reader, 1), ReaderHelpers.Str(reader, 2)),
+                ReaderHelpers.Str(reader, 3),
+                new TableInfo(ReaderHelpers.Str(reader, 4), ReaderHelpers.Str(reader, 5)),
+                ReaderHelpers.Str(reader, 6)));
+        }
+        return result;
+    }
+
     private static async Task<OracleConnection> OpenAsync(DbConnectionProfile profile, CancellationToken ct)
     {
         var builder = new OracleConnectionStringBuilder

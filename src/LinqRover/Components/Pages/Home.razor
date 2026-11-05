@@ -50,7 +50,7 @@ else
 
 @if (_showForm)
 {
-    <ConnectionForm Profile="_editing" OnSaved="OnFormSaved" OnCancel="CloseForm" />
+    <ConnectionForm Profile="@_editing" OnSaved="OnFormSaved" OnCancel="CloseForm" />
 }
 
 @code {

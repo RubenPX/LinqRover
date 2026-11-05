@@ -24,6 +24,9 @@ public interface IDatabaseProvider
 
     Task<IReadOnlyList<ColumnInfo>> GetColumnsAsync(DbConnectionProfile profile, string schema, string table, CancellationToken ct = default);
 
+    /// <summary>Claves foráneas en las que participa la tabla, como origen (hijo) o como destino (padre).</summary>
+    Task<IReadOnlyList<ForeignKeyRef>> GetForeignKeysAsync(DbConnectionProfile profile, string schema, string table, CancellationToken ct = default);
+
     /// <summary>
     /// Ejecuta SQL libre dentro de una transacción que siempre se deshace: ningún cambio llega a guardarse.
     /// Devuelve como máximo <paramref name="maxRows"/> filas.
