@@ -61,8 +61,15 @@ public sealed class ScriptService(DatabaseProviders providers)
     private Task<ScriptCompletion> GetCompletionAsync(DbConnectionProfile profile, string schema)
     {
         var key = profile.Id + "|" + profile.Engine + "|" + schema;
-        if (Completions.TryGetValue(key, out var entry) && DateTime.UtcNow - entry.Created < CompletionTtl)
-            return entry.Task;
+        if (Completions.TryGetValue(key, out var entry))
+        {
+            if (DateTime.UtcNow - entry.Created < CompletionTtl)
+                return entry.Task;
+
+            // Caducada: se libera el workspace de Roslyn que se sustituye.
+            if (entry.Task.IsCompletedSuccessfully)
+                entry.Task.Result.Dispose();
+        }
 
         var task = BuildCompletionAsync(profile, schema, key);
         Completions[key] = (DateTime.UtcNow, task);
