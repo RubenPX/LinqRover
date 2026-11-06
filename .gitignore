@@ -10,3 +10,6 @@ obj/
 
 # Monaco se copia desde node_modules en el build
 **/wwwroot/lib/monaco/
+
+# Salida de publish.cmd / publish.sh
+/build/

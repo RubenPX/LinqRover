@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>LinqRover</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <SatelliteResourceLanguages>es-ES</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- Interfaz compartida con la app de MAUI (src/LinqRover): se enlazan sus fuentes, no se copian. -->
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\LinqRover\Services\**\*.cs" Link="Services\%(RecursiveDir)%(Filename)%(Extension)" />
+    <RazorComponent Include="..\LinqRover\Components\**\*.razor" Link="Components\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="..\LinqRover\wwwroot\**" Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="EdoardoTona.Rustino.Blazor" Version="0.6.0-preview.2" />
+    <PackageReference Include="Z.Blazor.Diagrams" Version="3.0.4.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LinqRover.Core\LinqRover.Core.csproj" />
+    <ProjectReference Include="..\LinqRover.QueryBuilder\LinqRover.QueryBuilder.csproj" />
+  </ItemGroup>
+
+  <!-- Mismos pasos previos al build que la app de MAUI: estilos Tailwind y copia de Monaco -->
+  <Target Name="BuildSharedAssets" BeforeTargets="BeforeBuild">
+    <Exec Command="npm run build:css" WorkingDirectory="..\LinqRover" Condition="Exists('..\LinqRover\node_modules')" />
+    <Exec Command="npm run copy:monaco" WorkingDirectory="..\LinqRover" Condition="Exists('..\LinqRover\node_modules') And !Exists('..\LinqRover\wwwroot\lib\monaco\vs\loader.js')" />
+  </Target>
+</Project>

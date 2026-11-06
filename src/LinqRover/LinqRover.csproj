@@ -19,6 +19,9 @@
         <EnableDefaultCssItems>false</EnableDefaultCssItems>
         <Nullable>enable</Nullable>
 
+        <!-- Solo se publican los recursos de idioma español de los paquetes NuGet (el resto de carpetas de idioma sobran) -->
+        <SatelliteResourceLanguages>es-ES</SatelliteResourceLanguages>
+
         <!-- Enable XAML source generation for faster build times and improved performance.
              This generates C# code from XAML at compile time instead of runtime inflation.
              To disable, remove this line.
@@ -77,6 +80,11 @@
       <ProjectReference Include="..\LinqRover.Core\LinqRover.Core.csproj" />
       <ProjectReference Include="..\LinqRover.QueryBuilder\LinqRover.QueryBuilder.csproj" />
     </ItemGroup>
+
+    <!-- Tras publicar, quita las carpetas de idioma de WinAppSDK que no sean es-ES (las copia WinAppSDK, no NuGet) -->
+    <Target Name="PruneCultureFolders" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+        <Exec Command="powershell -NoProfile -Command &quot;Get-ChildItem -LiteralPath '$(PublishDir)' -Directory | Where-Object { $_.Name -match '^[a-z]{2,3}(-[A-Za-z0-9]+)+$' -and $_.Name -ne 'es-ES' } | Remove-Item -Recurse -Force&quot;" />
+    </Target>
 
     <!-- Compila Tailwind + DaisyUI antes del build (requiere `npm install` una vez) -->
     <Target Name="BuildTailwindCss" BeforeTargets="BeforeBuild" Condition="Exists('$(ProjectDir)node_modules')">
