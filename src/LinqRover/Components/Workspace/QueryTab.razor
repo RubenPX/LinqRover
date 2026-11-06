@@ -1,76 +1,81 @@
+@using LinqRover.QueryBuilder.Editor
+
 <div class="h-full min-h-0 flex flex-col gap-2 @(Active ? "" : "hidden")">
-    @if (IsSql)
-    {
-        <div class="flex-1 min-h-48 min-h-0 flex flex-col">
-            <SqlEditor @ref="_sqlEditor" Profile="@Profile" Schema="@Schema" TableNames="@TableNames"
-                       InitialText="@InitialText" Busy="@_busy" OnRun="RunSqlAsync" />
-        </div>
-
-        @if (_pendingSql is not null)
-        {
-            <div role="alert" class="alert alert-warning alert-soft text-sm py-2">
-                <span>La consulta no parece de lectura. Se ejecutará dentro de una transacción que se deshace, pero conviene confirmarlo.</span>
-                <button class="btn btn-sm" @onclick="ConfirmPendingAsync">Ejecutar de todos modos</button>
-                <button class="btn btn-sm btn-ghost" @onclick="() => _pendingSql = null">Cancelar</button>
-            </div>
-        }
-    }
-    else
-    {
-        <div class="@(_result is { Columns.Count: > 0 } ? "h-64 shrink-0" : "flex-1 min-h-0 flex flex-col")">
-            <SqlEditor Profile="@Profile" Schema="@Schema" TableNames="@TableNames" InitialText="@InitialText" Language="csharp"
-                       Busy="_busy" OnRun="RunScriptAsync" OnPreview="ShowSqlAsync" Completer="@CompleteAsync" />
-        </div>
-
-        @switch (_completionState)
-        {
-            case CompletionState.Preparing:
-                <div class="shrink-0 flex items-center gap-1 text-xs opacity-70">
-                    <span class="loading loading-spinner loading-xs"></span>
-                    Preparando el autocompletado (Roslyn)…
-                </div>
-                break;
-            case CompletionState.Failed:
-                <div class="shrink-0 text-xs text-warning" title="@_completionError">
-                    Autocompletado básico: no se pudo preparar Roslyn.
-                </div>
-                break;
-        }
-
-        @if (_sqlPreview is not null)
-        {
-            <div class="modal modal-open" role="dialog" aria-modal="true">
-                <div class="modal-box w-auto min-w-fit max-w-[90vw] flex flex-col gap-3">
-                    <div class="flex items-center justify-between gap-6">
-                        <h3 class="font-bold">SQL generado por EF Core (no se ha ejecutado)</h3>
-                        <button class="btn btn-ghost btn-sm" aria-label="Cerrar" @onclick="() => _sqlPreview = null">✕</button>
+    @* Editor arriba y resultados abajo, con una barra para cambiar su altura. Sin resultados, el editor ocupa todo. *@
+    <div class="flex-1 min-h-0 flex flex-col">
+        <VerticalSplit ShowBottom="@(_result is { Columns.Count: > 0 })" InitialBottomHeight="@(IsSql ? 288 : 256)">
+            <Top>
+                @if (IsSql)
+                {
+                    <div class="flex-1 min-h-48 min-h-0 flex flex-col">
+                        <SqlEditor @ref="_sqlEditor" Profile="@Profile" Schema="@Schema" TableNames="@TableNames"
+                                   InitialText="@InitialText" Busy="@_busy" OnRun="RunSqlAsync" />
                     </div>
-                    <pre class="overflow-auto max-h-[70vh] text-xs font-mono-sql whitespace-pre">@_sqlPreview</pre>
-                    <div class="modal-action mt-0">
-                        <button class="btn btn-sm" @onclick="() => _sqlPreview = null">Cerrar</button>
+
+                    @if (_pendingSql is not null)
+                    {
+                        <div role="alert" class="alert alert-warning alert-soft text-sm py-2">
+                            <span>La consulta no parece de lectura. Se ejecutará dentro de una transacción que se deshace, pero conviene confirmarlo.</span>
+                            <button class="btn btn-sm" @onclick="ConfirmPendingAsync">Ejecutar de todos modos</button>
+                            <button class="btn btn-sm btn-ghost" @onclick="() => _pendingSql = null">Cancelar</button>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="flex-1 min-h-0 flex flex-col">
+                        <SqlEditor Profile="@Profile" Schema="@Schema" TableNames="@TableNames" InitialText="@InitialText" Language="csharp"
+                                   Busy="_busy" OnRun="RunScriptAsync" OnPreview="ShowSqlAsync" Completer="@CompleteAsync" />
                     </div>
-                </div>
-                <div class="modal-backdrop" @onclick="() => _sqlPreview = null"></div>
-            </div>
-        }
-    }
+
+                    @switch (_completionState)
+                    {
+                        case CompletionState.Preparing:
+                            <div class="shrink-0 flex items-center gap-1 text-xs opacity-70">
+                                <span class="loading loading-spinner loading-xs"></span>
+                                Preparando el autocompletado (Roslyn)…
+                            </div>
+                            break;
+                        case CompletionState.Failed:
+                            <div class="shrink-0 text-xs text-warning" title="@_completionError">
+                                Autocompletado básico: no se pudo preparar Roslyn.
+                            </div>
+                            break;
+                    }
+
+                    @if (_sqlPreview is not null)
+                    {
+                        <div class="modal modal-open" role="dialog" aria-modal="true">
+                            <div class="modal-box w-[min(90vw,56rem)] max-w-[90vw] flex flex-col gap-3">
+                                <div class="flex items-center justify-between gap-6">
+                                    <h3 class="font-bold">SQL generado por EF Core (no se ha ejecutado)</h3>
+                                    <button class="btn btn-ghost btn-sm" aria-label="Cerrar" @onclick="() => _sqlPreview = null">✕</button>
+                                </div>
+                                <pre class="overflow-auto max-h-[70vh] text-xs font-mono-sql whitespace-pre">@_sqlPreview</pre>
+                                <div class="modal-action mt-0">
+                                    <button class="btn btn-sm" @onclick="() => _sqlPreview = null">Cerrar</button>
+                                </div>
+                            </div>
+                            <div class="modal-backdrop" @onclick="() => _sqlPreview = null"></div>
+                        </div>
+                    }
+                }
+            </Top>
+            <Bottom>
+                <DataViewer @key="_resultKey" LoadPage="LoadResultPage" PageSize="30"
+                            Elapsed="_result?.Elapsed"
+                            Note="@(_result?.Truncated == true ? $"(se muestran las primeras {MaxRows})" : null)" />
+            </Bottom>
+        </VerticalSplit>
+    </div>
 
     @if (_error is not null)
     {
         <div role="alert" class="alert alert-error alert-soft text-sm py-2 shrink-0 font-mono-sql whitespace-pre-wrap">@_error</div>
     }
-    else if (_status is not null)
+    else if (_status is not null && _result is not { Columns.Count: > 0 })
     {
         <p class="shrink-0 text-sm opacity-70">@_status</p>
-    }
-
-    @if (_result is { Columns.Count: > 0 })
-    {
-        <div class="@(IsSql ? "h-72 shrink-0" : "flex-1 min-h-0 relative")">
-            <div class="@(IsSql ? "h-full flex flex-col" : "absolute inset-0 flex flex-col")">
-                <DataViewer @key="_resultKey" LoadPage="LoadResultPage" PageSize="30" />
-            </div>
-        </div>
     }
 
     @if (IsSql && _history.Count > 0)

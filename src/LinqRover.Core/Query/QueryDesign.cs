@@ -35,7 +35,9 @@ public sealed record QueryDesign(
     IReadOnlyList<AggregateItem> Aggregates,
     int? Skip = null,
     int? Take = null,
-    int? Limit = null);
+    int? Limit = null,
+    /// <summary>Columnas de Select que identifican una fila: de cada combinación de estos valores se queda una sola.</summary>
+    IReadOnlyList<ColumnRef>? DistinctBy = null);
 
 /// <summary>Tabla que se añade a la consulta y sus condiciones. En cada condición, Left ya está colocada y Right es la tabla del paso.</summary>
 public sealed record JoinStep(string SourceId, IReadOnlyList<QueryJoin> Conditions);
@@ -70,6 +72,14 @@ public static class QueryDesignPlan
 
         foreach (var reference in design.Select.Concat(design.GroupBy))
             ResolveColumn(engine, design, reference);
+
+        foreach (var reference in design.DistinctBy ?? Array.Empty<ColumnRef>())
+        {
+            ResolveColumn(engine, design, reference);
+            if (!design.Select.Contains(reference))
+                throw new QueryDesignException(
+                    $"{Describe(design, reference)} debe estar en Select para usarla en DistinctBy.");
+        }
 
         foreach (var item in design.Where)
         {

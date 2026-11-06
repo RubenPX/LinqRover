@@ -56,6 +56,14 @@
                 else
                 {
                     <span>Filas @(_page * PageSize + 1)–@(Math.Min((_page + 1) * PageSize, _result.TotalRows)) de @_result.TotalRows</span>
+                    @if (Elapsed is { } elapsed)
+                    {
+                        <span>· @elapsed.TotalMilliseconds.ToString("0") ms</span>
+                    }
+                    @if (Note is not null)
+                    {
+                        <span>@Note</span>
+                    }
                 }
             </span>
             <div class="join">
@@ -70,6 +78,10 @@
 @code {
     [Parameter, EditorRequired] public Func<int, int, Task<PageResult>> LoadPage { get; set; } = default!;
     [Parameter] public int PageSize { get; set; } = 30;
+    /// <summary>Tiempo de ejecución de la consulta, que se muestra al pie.</summary>
+    [Parameter] public TimeSpan? Elapsed { get; set; }
+    /// <summary>Aviso opcional al pie (p. ej. «(se muestran las primeras 1000)»).</summary>
+    [Parameter] public string? Note { get; set; }
 
     private PageResult? _result;
     private int _page;

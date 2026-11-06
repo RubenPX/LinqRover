@@ -2,9 +2,15 @@ using LinqRover.Core.Models;
 
 namespace LinqRover.Core.Query;
 
-/// <summary>Genera el SQL de un diseño visual para SQL Server u Oracle (11g o superior).</summary>
+/// <summary>
+/// Genera el SQL de un diseño visual para SQL Server u Oracle (11g o superior).
+/// El resultado va formateado en varias líneas, con una columna por línea y cada cláusula en su sitio.
+/// </summary>
 public static class QueryDesignSql
 {
+    private const string Indent = "    ";
+    private const string RowNumberAlias = "RN__";
+
     public static string Build(DatabaseEngine engine, QueryDesign design)
     {
         QueryDesignPlan.Validate(engine, design);
@@ -35,55 +41,136 @@ public static class QueryDesignSql
             return $"{column} {QueryLiterals.SqlOperator(item.Operator)} {QueryLiterals.Sql(engine, item.Value!, info)}";
         }
 
-        var select = string.Join(", ", outputs.Select(o =>
-            $"{(o.Column is { } c ? Column(c) : Aggregate(o.Aggregate!))} AS {Quote(engine, o.Alias)}"));
+        // SELECT: una columna por línea.
+        var selectItems = outputs
+            .Select(o => $"{(o.Column is { } c ? Column(c) : Aggregate(o.Aggregate!))} AS {Quote(engine, o.Alias)}")
+            .ToList();
 
-        var from = $"{TableRef(engine, baseSource)} {aliases[baseSource.Id]}";
+        // FROM y JOIN: cada join ocupa tres líneas (tabla, ON, AND adicionales).
+        var from = new List<string> { $"FROM {TableRef(engine, baseSource)} {aliases[baseSource.Id]}" };
         foreach (var step in steps)
         {
             var target = design.Sources.First(s => s.Id == step.SourceId);
-            var on = string.Join(" AND ", step.Conditions.Select(c => $"{Column(c.Left)} = {Column(c.Right)}"));
-            from += $" INNER JOIN {TableRef(engine, target)} {aliases[target.Id]} ON {on}";
+            var on = step.Conditions
+                .Select(c => $"{Column(c.Left)} = {Column(c.Right)}")
+                .ToList();
+
+            from.Add($"{Indent}INNER JOIN {TableRef(engine, target)} {aliases[target.Id]}");
+            from.Add($"{Indent}{Indent}ON {on[0]}");
+            from.AddRange(on.Skip(1).Select(condition => $"{Indent}{Indent}AND {condition}"));
         }
 
-        // Condiciones encadenadas por la izquierda: ((c1) OR c2) AND c3
-        string? where = null;
-        foreach (var item in design.Where)
+        var tail = new List<string>();
+
+        if (design.Where.Count > 0)
         {
-            var condition = Condition(item);
-            where = where is null ? condition : $"({where}) {(item.Or ? "OR" : "AND")} {condition}";
+            var where = WhereLines(design.Where, Condition);
+            tail.Add($"WHERE {where[0]}");
+            tail.AddRange(where.Skip(1).Select(line => "  " + line));
         }
 
-        var tail = (where is null ? "" : $" WHERE {where}")
-            + (design.GroupBy.Count == 0 ? "" : " GROUP BY " + string.Join(", ", design.GroupBy.Select(Column)));
+        if (design.GroupBy.Count > 0)
+            tail.Add("GROUP BY " + string.Join(", ", design.GroupBy.Select(Column)));
+
+        // DistinctBy: ROW_NUMBER() por cada combinación de claves y se queda con la fila 1 (la primera que aparezca).
+        var distinct = design.DistinctBy ?? Array.Empty<ColumnRef>();
+        var items = selectItems;
+        var outerFrom = from;
+        var outerTail = tail;
+
+        if (distinct.Count > 0)
+        {
+            var rowNumber = Quote(engine, RowNumberAlias);
+            var partition = string.Join(", ", distinct.Select(Column));
+            // Oracle exige ORDER BY dentro de ROW_NUMBER (ORA-30485); cualquier orden vale porque la fila es «la primera».
+            var order = engine == DatabaseEngine.SqlServer ? "(SELECT NULL)" : "NULL";
+            var inner = Query("SELECT",
+                [.. selectItems, $"ROW_NUMBER() OVER (PARTITION BY {partition} ORDER BY {order}) AS {rowNumber}"],
+                from,
+                tail);
+
+            items = outputs.Select(o => Quote(engine, o.Alias)).ToList();
+            outerFrom = ["FROM (", IndentBlock(string.Join("\n", inner)), ") d__"];
+            outerTail = [$"WHERE {rowNumber} = 1"];
+        }
 
         var take = design.Take ?? design.Limit;
         var skip = design.Skip;
 
         if (engine == DatabaseEngine.SqlServer)
         {
-            var top = skip is null && take is not null ? $"TOP ({take}) " : "";
-            var sql = $"SELECT {top}{select} FROM {from}{tail}";
+            var top = skip is null && take is not null ? $" TOP ({take})" : "";
+            var lines = Query($"SELECT{top}", items, outerFrom, outerTail);
             if (skip is not null)
             {
-                sql += $" ORDER BY (SELECT NULL) OFFSET {skip} ROWS";
+                lines.Add("ORDER BY (SELECT NULL)");
+                lines.Add($"OFFSET {skip} ROWS");
                 if (take is not null)
-                    sql += $" FETCH NEXT {take} ROWS ONLY";
+                    lines.Add($"FETCH NEXT {take} ROWS ONLY");
             }
-            return sql;
+            return string.Join("\n", lines);
         }
 
         // Oracle 11g no tiene OFFSET/FETCH: se usa ROWNUM.
-        var inner = $"SELECT {select} FROM {from}{tail}";
+        var query = string.Join("\n", Query("SELECT", items, outerFrom, outerTail));
         if (skip is null)
-            return take is null ? inner : $"SELECT * FROM ({inner}) WHERE ROWNUM <= {take}";
+        {
+            if (take is null) return query;
+            return $"SELECT *\nFROM (\n{IndentBlock(query)}\n)\nWHERE ROWNUM <= {take}";
+        }
 
-        var numbered = take is null
-            ? $"SELECT a__.*, ROWNUM AS \"RN__\" FROM ({inner}) a__"
-            : $"SELECT a__.*, ROWNUM AS \"RN__\" FROM ({inner}) a__ WHERE ROWNUM <= {skip + take}";
+        var numbered = new List<string>
+        {
+            "SELECT a__.*, ROWNUM AS \"RN__\"",
+            "FROM (",
+            IndentBlock(query),
+            ") a__",
+        };
+        if (take is not null)
+            numbered.Add($"WHERE ROWNUM <= {skip + take}");
+
         var columns = string.Join(", ", outputs.Select(o => Quote(engine, o.Alias)));
-        return $"SELECT {columns} FROM ({numbered}) WHERE \"RN__\" > {skip}";
+        return $"SELECT {columns}\nFROM (\n{IndentBlock(string.Join("\n", numbered))}\n)\nWHERE \"RN__\" > {skip}";
     }
+
+    /// <summary>
+    /// Condiciones encadenadas por la izquierda, con el mismo significado que antes: ((c1) OR c2) AND c3.
+    /// Devuelve las líneas de la expresión; la primera va pegada a la cláusula WHERE.
+    /// </summary>
+    private static List<string> WhereLines(IReadOnlyList<WhereItem> items, Func<WhereItem, string> condition)
+    {
+        List<string> expression = [];
+        for (var i = 0; i < items.Count; i++)
+        {
+            var text = condition(items[i]);
+            if (i == 0)
+            {
+                expression = [text];
+                continue;
+            }
+
+            var op = items[i].Or ? "OR" : "AND";
+            expression = i == 1
+                ? [expression[0], $"{op} {text}"]
+                : ["(", .. expression.Select(line => Indent + line), ")", $"{op} {text}"];
+        }
+        return expression;
+    }
+
+    /// <summary>Une SELECT, FROM y las cláusulas finales en líneas, con las columnas sangradas.</summary>
+    private static List<string> Query(string head, IReadOnlyList<string> selectItems, IReadOnlyList<string> from, IReadOnlyList<string> tail)
+    {
+        var lines = new List<string> { head };
+        for (var i = 0; i < selectItems.Count; i++)
+            lines.Add(Indent + selectItems[i] + (i < selectItems.Count - 1 ? "," : ""));
+        lines.AddRange(from);
+        lines.AddRange(tail);
+        return lines;
+    }
+
+    /// <summary>Sangra cada línea del texto con cuatro espacios.</summary>
+    private static string IndentBlock(string text) =>
+        string.Join("\n", text.Split('\n').Select(line => Indent + line));
 
     private static string TableRef(DatabaseEngine engine, QuerySource source) =>
         $"{Quote(engine, source.Schema)}.{Quote(engine, source.Table)}";

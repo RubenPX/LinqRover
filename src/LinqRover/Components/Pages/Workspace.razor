@@ -130,7 +130,7 @@
                                     {
                                         <div role="alert" class="alert alert-error alert-soft text-sm py-2 font-mono-sql whitespace-pre-wrap">@doc.Error</div>
                                     }
-                                    else if (doc.Status is not null)
+                                    else if (doc.Status is not null && doc.Result is not { Columns.Count: > 0 })
                                     {
                                         <p class="text-sm vs-muted">@doc.Status</p>
                                     }
@@ -138,7 +138,9 @@
                                     @if (doc.Result is { Columns.Count: > 0 })
                                     {
                                         <div class="flex-1 min-h-0 flex flex-col">
-                                            <DataViewer @key="doc.ResultKey" LoadPage="(page, size) => LoadDocPageAsync(doc, page, size)" PageSize="30" />
+                                            <DataViewer @key="doc.ResultKey" LoadPage="(page, size) => LoadDocPageAsync(doc, page, size)" PageSize="30"
+                                                        Elapsed="doc.Result.Elapsed"
+                                                        Note="@(doc.Result.Truncated ? $"(se muestran las primeras {VisualMaxRows})" : null)" />
                                         </div>
                                     }
                                 </ResultContent>

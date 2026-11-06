@@ -1,0 +1,74 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@* Dos paneles apilados con una barra arrastrable entre ellos. El de abajo tiene altura fija (la que se arrastra);
+   el de arriba ocupa el resto. Si ShowBottom es false, solo se ve el de arriba. *@
+<div class="vs-split" @ref="_root">
+    <div class="vs-split-top">
+        @Top
+    </div>
+
+    @if (ShowBottom && Bottom is not null)
+    {
+        <div class="vs-split-handle" @ref="_handle" role="separator" aria-orientation="horizontal"
+             title="Arrastra para cambiar el tamaño"></div>
+        <div class="vs-split-bottom" @ref="_bottom" style="height: @(_bottomHeight)px">
+            @Bottom
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Panel de arriba (editor o diagrama).</summary>
+    [Parameter] public RenderFragment? Top { get; set; }
+    /// <summary>Panel de abajo (tabla de resultados). Su altura es la que se arrastra.</summary>
+    [Parameter] public RenderFragment? Bottom { get; set; }
+    /// <summary>true para mostrar el panel de abajo.</summary>
+    [Parameter] public bool ShowBottom { get; set; } = true;
+    /// <summary>Altura inicial del panel de abajo, en píxeles.</summary>
+    [Parameter] public int InitialBottomHeight { get; set; } = 288;
+
+    private const int MinBottom = 96;
+    private const int MinTop = 120;
+
+    private ElementReference _root;
+    private ElementReference _handle;
+    private ElementReference _bottom;
+    private DotNetObjectReference<VerticalSplit>? _dotNet;
+    private int _bottomHeight;
+    private bool _registered;
+
+    protected override void OnInitialized()
+    {
+        _bottomHeight = InitialBottomHeight;
+        _dotNet = DotNetObjectReference.Create(this);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // La barra y el panel de abajo se crean y se destruyen con ShowBottom: se registra cada vez que aparecen.
+        if (!ShowBottom || Bottom is null)
+        {
+            _registered = false;
+            return;
+        }
+        if (_registered) return;
+
+        _registered = true;
+        await JS.InvokeVoidAsync("lrSplit.register", _handle, _root, _bottom, _dotNet, MinBottom, MinTop);
+    }
+
+    /// <summary>Llamado desde split.js al soltar la barra: guarda la altura final.</summary>
+    [JSInvokable]
+    public void SetBottomHeight(int height)
+    {
+        _bottomHeight = height;
+        StateHasChanged();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _dotNet?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
