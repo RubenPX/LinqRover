@@ -77,7 +77,7 @@
     {
         <details class="dropdown text-sm">
             <summary class="btn btn-ghost btn-xs">Historial (@_history.Count)</summary>
-            <ul class="dropdown-content menu bg-base-100 rounded-box z-10 w-[32rem] max-h-64 overflow-y-auto shadow p-2">
+            <ul class="dropdown-content menu vs-popup z-10 w-[32rem] max-h-64 overflow-y-auto p-1">
                 @foreach (var item in _history)
                 {
                     <li><button class="font-mono-sql text-xs truncate" @onclick="() => LoadFromHistoryAsync(item)">@item</button></li>

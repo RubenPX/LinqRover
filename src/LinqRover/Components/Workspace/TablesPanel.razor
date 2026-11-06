@@ -1,20 +1,23 @@
 <div class="flex flex-col gap-2 h-full min-h-0">
-    <input class="input input-sm w-full" placeholder="Buscar tabla..." @bind="_filter" @bind:event="oninput" />
+    <input class="input input-sm w-full" placeholder="Buscar tabla..." aria-label="Buscar tabla" @bind="_filter" @bind:event="oninput" />
 
-    <ul class="menu menu-sm p-0 w-full flex-nowrap overflow-y-auto flex-1 min-h-0">
+    <ul class="vs-tree flex-1 min-h-0 overflow-y-auto" aria-label="Tablas">
         @foreach (var table in Filtered)
         {
             <li data-table="@table" onpointerdown="lrDrag.down(event)"
                 @onmouseenter="e => ShowColumnsAsync(table, e)" @onmouseleave="HideColumns">
-                <button class="@(table == SelectedTable ? "active" : "")" @onclick="() => OnSelect.InvokeAsync(table)">
-                    <span class="opacity-60">▦</span>
+                <button class="vs-tree-row @(table == SelectedTable ? "is-active" : "")" @onclick="() => OnSelect.InvokeAsync(table)">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
+                        <rect x="2" y="2.5" width="12" height="11" rx="1" />
+                        <path d="M2 6.5h12M6 6.5v7" />
+                    </svg>
                     <span class="font-mono-sql text-xs truncate">@table</span>
                 </button>
             </li>
         }
         @if (!Filtered.Any())
         {
-            <li class="disabled"><span class="text-xs opacity-60">Sin resultados</span></li>
+            <li class="vs-muted text-xs px-5 py-1">Sin resultados</li>
         }
     </ul>
 </div>
@@ -22,7 +25,7 @@
 @* Al pasar el ratón por una tabla: sus columnas y tipos, a la derecha de la lista. No captura el puntero. *@
 @if (_hovered is not null)
 {
-    <div class="fixed z-50 pointer-events-none card bg-base-100 border border-base-300 shadow-lg p-3 w-80"
+    <div class="fixed z-50 pointer-events-none vs-popup p-3 w-80"
          style="left: @(TooltipLeft)px; top: @(_top)px;">
         <div class="font-mono-sql text-xs font-semibold mb-2 truncate">@_hovered</div>
 

@@ -35,8 +35,8 @@
         </div>
 
         @* Panel de consulta: ocupa todo el alto de la zona y hace scroll por dentro. *@
-        <aside class="w-80 shrink-0 h-full min-h-0 overflow-y-auto card bg-base-100 border border-base-300">
-            <div class="card-body p-3">
+        <aside class="w-80 shrink-0 h-full min-h-0 overflow-y-auto bg-base-200 border border-base-300 rounded-box">
+            <div class="p-3">
                 <QueryDesignPanel Sources="@QuerySources" Joins="@QueryJoins" Engine="Engine"
                                   OnExecute="OnExecute" Busy="Busy" />
             </div>

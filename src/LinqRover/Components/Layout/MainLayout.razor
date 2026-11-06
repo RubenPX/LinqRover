@@ -1,14 +1,85 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject WorkbenchState Workbench
+@inject NavigationManager Nav
 
-<div class="flex flex-col h-screen bg-base-200">
-    <header class="navbar bg-base-100 border-b border-base-300 min-h-12 h-12 px-3 gap-2">
-        <a href="" class="font-semibold">LinqRover</a>
-        <span class="text-xs opacity-50">· SQL Server y Oracle</span>
-        <div class="flex-1"></div>
-        <a href="" class="btn btn-ghost btn-sm">Conexiones</a>
-    </header>
+<div class="vs-shell">
+    <div class="vs-body">
+        @* Barra de actividades: iconos a la izquierda, como en VS Code *@
+        <nav class="vs-activitybar" aria-label="Barra de actividades">
+            <a href="" class="vs-activity-item @(_onConnections ? "is-active" : "")" title="Conexiones"
+               aria-label="Conexiones" aria-current="@(_onConnections ? "page" : null)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <ellipse cx="12" cy="5" rx="8" ry="3" />
+                    <path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
+                    <path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" />
+                </svg>
+            </a>
 
-    <main class="flex-1 overflow-hidden min-h-0 p-4">
-        @Body
-    </main>
+            @if (Workbench.ActiveProfileId is { } profileId)
+            {
+                <a href="workspace/@profileId" class="vs-activity-item @(_onWorkspace ? "is-active" : "")" title="Explorador"
+                   aria-label="Explorador" aria-current="@(_onWorkspace ? "page" : null)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M20 7h-3a2 2 0 0 1-2-2V2" />
+                        <path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z" />
+                        <path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8" />
+                    </svg>
+                </a>
+            }
+        </nav>
+
+        <div class="vs-workbench">
+            @Body
+        </div>
+    </div>
+
+    @* Barra de estado: conexión activa a la izquierda, avisos y datos del espacio de trabajo *@
+    <footer class="vs-statusbar">
+        @if (Workbench.ActiveProfileId is not null)
+        {
+            <span class="vs-statusbar-item is-remote" title="Conexión activa">@Workbench.EngineName · @Workbench.ConnectionName</span>
+            <span class="vs-statusbar-item" title="Esquema seleccionado">Esquema: @Workbench.Schema</span>
+            <span class="vs-statusbar-item is-muted">Solo lectura: los cambios se deshacen</span>
+        }
+        else
+        {
+            <span class="vs-statusbar-item is-muted">LinqRover</span>
+        }
+        <span class="vs-statusbar-spacer"></span>
+        <span class="vs-statusbar-item is-muted">Oracle · SQL Server</span>
+    </footer>
 </div>
+
+@code {
+    private bool _onConnections;
+    private bool _onWorkspace;
+
+    protected override void OnInitialized()
+    {
+        Workbench.Changed += OnStateChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        UpdateLocation();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        UpdateLocation();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateLocation()
+    {
+        var path = Nav.ToBaseRelativePath(Nav.Uri).Trim('/');
+        _onWorkspace = path.StartsWith("workspace/", StringComparison.OrdinalIgnoreCase);
+        _onConnections = path.Length == 0;
+    }
+
+    public void Dispose()
+    {
+        Workbench.Changed -= OnStateChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

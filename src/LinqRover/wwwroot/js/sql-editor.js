@@ -23,6 +23,7 @@ window.sqlEditor = (function () {
             monacoPromise = new Promise((resolve) => {
                 window.require.config({ paths: { vs: "lib/monaco/vs" } });
                 window.require(["vs/editor/editor.main"], () => {
+                    defineTheme(window.monaco);
                     registerProvider(window.monaco);
                     registerCSharpProvider(window.monaco);
                     resolve(window.monaco);
@@ -30,6 +31,40 @@ window.sqlEditor = (function () {
             });
         }
         return monacoPromise;
+    }
+
+    // Tema del editor: «Dark Modern» de VS Code (fondo #1f1f1f, selección #264f78, números de línea grises).
+    function defineTheme(monaco) {
+        monaco.editor.defineTheme("lr-dark-modern", {
+            base: "vs-dark",
+            inherit: true,
+            rules: [],
+            colors: {
+                "editor.background": "#1f1f1f",
+                "editor.foreground": "#cccccc",
+                "editorLineNumber.foreground": "#6e7681",
+                "editorLineNumber.activeForeground": "#cccccc",
+                "editor.selectionBackground": "#264f78",
+                "editor.inactiveSelectionBackground": "#3a3d41",
+                "editor.lineHighlightBackground": "#282828",
+                "editor.lineHighlightBorder": "#282828",
+                "editorCursor.foreground": "#aeafad",
+                "editorIndentGuide.background1": "#404040",
+                "editorWidget.background": "#202020",
+                "editorWidget.border": "#454545",
+                "editorSuggestWidget.background": "#202020",
+                "editorSuggestWidget.border": "#454545",
+                "editorSuggestWidget.selectedBackground": "#04395e",
+                "editorSuggestWidget.highlightForeground": "#2aaaff",
+                "editorHoverWidget.background": "#202020",
+                "editorHoverWidget.border": "#454545",
+                "editorGutter.background": "#1f1f1f",
+                "minimap.background": "#1f1f1f",
+                "scrollbarSlider.background": "#79797966",
+                "scrollbarSlider.hoverBackground": "#646464b3",
+                "scrollbarSlider.activeBackground": "#bfbfbf66",
+            },
+        });
     }
 
     // Tablas y alias que aparecen tras FROM / JOIN en el texto completo.
@@ -262,7 +297,7 @@ window.sqlEditor = (function () {
             wordWrap: "on",
             scrollBeyondLastLine: false,
             tabSize: 2,
-            theme: document.documentElement.dataset.theme === "dark" ? "vs-dark" : "vs",
+            theme: "lr-dark-modern",
         });
 
         const ctx = { id, editor, model, dotNet, tables: [], columns: new Map() };
