@@ -14,7 +14,6 @@
     <Compile Include="Program.cs" />
     <Compile Include="..\LinqRover\Services\**\*.cs" Link="Services\%(RecursiveDir)%(Filename)%(Extension)" />
     <RazorComponent Include="..\LinqRover\Components\**\*.razor" Link="Components\%(RecursiveDir)%(Filename)%(Extension)" />
-    <Content Include="..\LinqRover\wwwroot\**" Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,5 +31,16 @@
   <Target Name="BuildSharedAssets" BeforeTargets="BeforeBuild">
     <Exec Command="npm run build:css" WorkingDirectory="..\LinqRover" Condition="Exists('..\LinqRover\node_modules')" />
     <Exec Command="npm run copy:monaco" WorkingDirectory="..\LinqRover" Condition="Exists('..\LinqRover\node_modules') And !Exists('..\LinqRover\wwwroot\lib\monaco\vs\loader.js')" />
+  </Target>
+
+  <!-- wwwroot se genera en este proyecto copiando el de LinqRover (no es un enlace). Se regenera en cada build. -->
+  <Target Name="GenerateWwwroot" BeforeTargets="BeforeBuild">
+    <ItemGroup>
+      <_SharedWww Include="..\LinqRover\wwwroot\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SharedWww)" DestinationFiles="@(_SharedWww->'wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
   </Target>
 </Project>

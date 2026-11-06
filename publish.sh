@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Publica LinqRover (Release, win-x64) en la carpeta ./build, junto a este script.
+# Publica LinqRover (host Rustino, Release, win-x64, autocontenido, archivo único) en ./build.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 OUT="$(pwd)/build"
 
-dotnet publish "src/LinqRover/LinqRover.csproj" \
+dotnet publish "src/LinqRover.Rustino/LinqRover.Rustino.csproj" \
   -c Release \
-  -f net10.0-windows10.0.19041.0 \
   -r win-x64 \
   --self-contained true \
   -p:PublishSingleFile=true \

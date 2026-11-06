@@ -13,3 +13,6 @@ obj/
 
 # Salida de publish.cmd / publish.sh
 /build/
+
+# wwwroot generado en LinqRover.Rustino (copia de src/LinqRover/wwwroot en cada build)
+/src/LinqRover.Rustino/wwwroot/
