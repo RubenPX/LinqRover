@@ -29,15 +29,25 @@ $oldBytes = [Text.Encoding]::UTF8.GetBytes($oldName + [char]0)
 $newBytes = [Text.Encoding]::UTF8.GetBytes($newName + [char]0)
 if ($newBytes.Length -gt 1024) { throw 'La ruta nueva supera 1024 bytes' }
 
-$idx = -1
-for ($i = 0; $i -le $bytes.Length - $oldBytes.Length; $i++) {
-    $match = $true
-    for ($j = 0; $j -lt $oldBytes.Length; $j++) {
-        if ($bytes[$i + $j] -ne $oldBytes[$j]) { $match = $false; break }
+function Find-Bytes([byte[]]$haystack, [byte[]]$needle) {
+    for ($i = 0; $i -le $haystack.Length - $needle.Length; $i++) {
+        $match = $true
+        for ($j = 0; $j -lt $needle.Length; $j++) {
+            if ($haystack[$i + $j] -ne $needle[$j]) { $match = $false; break }
+        }
+        if ($match) { return $i }
     }
-    if ($match) { $idx = $i; break }
+    return -1
 }
-if ($idx -lt 0) { throw "No se encontro '$oldName' en $exe" }
+
+# Si el exe ya tiene la ruta nueva (publicado y parcheado antes), no se vuelve a tocar.
+if ((Find-Bytes $bytes $newBytes) -ge 0) {
+    Write-Host "Apphost ya parcheado ('$newName'): no se modifica."
+    exit 0
+}
+
+$idx = Find-Bytes $bytes $oldBytes
+if ($idx -lt 0) { throw "No se encontro '$oldName' ni '$newName' en $exe" }
 
 # El apphost reserva un buffer de 1024 bytes para la ruta: lo que la ruta nueva ocupa de mas tiene que estar libre.
 for ($k = $idx + $oldBytes.Length; $k -lt $idx + $newBytes.Length; $k++) {
