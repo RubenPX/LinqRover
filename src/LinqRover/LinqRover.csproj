@@ -75,6 +75,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\LinqRover.Core\LinqRover.Core.csproj" />
+      <ProjectReference Include="..\LinqRover.QueryBuilder\LinqRover.QueryBuilder.csproj" />
     </ItemGroup>
 
     <!-- Compila Tailwind + DaisyUI antes del build (requiere `npm install` una vez) -->

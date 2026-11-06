@@ -33,3 +33,23 @@ html, body {
   opacity: 0.9;
   white-space: nowrap;
 }
+
+/* Barra de error no controlado de Blazor: oculta; Blazor la muestra solo si hay una excepción sin capturar */
+#blazor-error-ui {
+  background: var(--color-warning, #fef9c3);
+  color: var(--color-base-content, #1f2937);
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+  position: fixed;
+  z-index: 1000;
+  display: none;
+}
+
+#blazor-error-ui .dismiss {
+  cursor: pointer;
+  position: absolute;
+  right: 0.75rem;
+  top: 0.5rem;
+}

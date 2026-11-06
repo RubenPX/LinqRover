@@ -1,0 +1,22 @@
+<div class="bg-base-100 rounded-lg shadow-sm font-mono-sql text-xs text-left select-none border-2 @(Node.Selected ? "border-primary" : "border-base-300")" style="width: 240px;">
+    <div class="px-2.5 py-1.5 font-semibold rounded-t-md truncate bg-base-200">@Node.Title</div>
+
+    @foreach (var column in Node.Columns)
+    {
+        <div class="relative flex items-center justify-between gap-2 px-2.5 h-5">
+            <PortRenderer Port="Node.LeftPort(column.Name)" Style="@PortStyle("left: 0;")" />
+            <span class="flex-1 min-w-0 truncate">@column.Name</span>
+            <span class="opacity-60 whitespace-nowrap">@(column.IsPrimaryKey ? "PK " : "")@column.DataType</span>
+            <PortRenderer Port="Node.RightPort(column.Name)" Style="@PortStyle("right: 0;")" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TableNodeModel Node { get; set; } = default!;
+
+    /// <summary>Estilo del puerto: círculo de 20 px centrado verticalmente en la fila, en el borde indicado.</summary>
+    private static string PortStyle(string side) =>
+        "position: absolute; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; " +
+        "background-color: #f5f5f5; border: 1px solid #9ca3af; cursor: crosshair; " + side;
+}

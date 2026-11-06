@@ -4,7 +4,8 @@
     <ul class="menu menu-sm p-0 w-full flex-nowrap overflow-y-auto flex-1 min-h-0">
         @foreach (var table in Filtered)
         {
-            <li>
+            <li data-table="@table" onpointerdown="lrDrag.down(event)"
+                @onmouseenter="e => ShowColumnsAsync(table, e)" @onmouseleave="HideColumns">
                 <button class="@(table == SelectedTable ? "active" : "")" @onclick="() => OnSelect.InvokeAsync(table)">
                     <span class="opacity-60">▦</span>
                     <span class="font-mono-sql text-xs truncate">@table</span>
@@ -18,13 +19,113 @@
     </ul>
 </div>
 
+@* Al pasar el ratón por una tabla: sus columnas y tipos, a la derecha de la lista. No captura el puntero. *@
+@if (_hovered is not null)
+{
+    <div class="fixed z-50 pointer-events-none card bg-base-100 border border-base-300 shadow-lg p-3 w-80"
+         style="left: @(TooltipLeft)px; top: @(_top)px;">
+        <div class="font-mono-sql text-xs font-semibold mb-2 truncate">@_hovered</div>
+
+        @if (_loadError is not null)
+        {
+            <span class="text-xs text-error">@_loadError</span>
+        }
+        else if (_columns is null)
+        {
+            <span class="text-xs opacity-60">Cargando columnas…</span>
+        }
+        else if (_columns.Count == 0)
+        {
+            <span class="text-xs opacity-60">Sin columnas.</span>
+        }
+        else
+        {
+            <ul class="flex flex-col gap-1 max-h-[80vh] overflow-hidden">
+                @foreach (var column in _columns)
+                {
+                    <li class="flex items-center gap-2 text-xs">
+                        <span class="font-mono-sql flex-1 min-w-0 truncate">@column.Name</span>
+                        @if (column.IsPrimaryKey)
+                        {
+                            <span class="badge badge-xs badge-primary">PK</span>
+                        }
+                        <span class="font-mono-sql opacity-60 whitespace-nowrap">@column.DataType</span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+}
+
 @code {
+    /// <summary>Posición horizontal del tooltip: a la derecha de la lista de tablas (la barra lateral mide 256 px más su margen).</summary>
+    private const int TooltipLeft = 284;
+
     [Parameter, EditorRequired] public IReadOnlyList<string> Tables { get; set; } = [];
     [Parameter] public string SelectedTable { get; set; } = "";
     [Parameter] public EventCallback<string> OnSelect { get; set; }
+    /// <summary>Lee las columnas de una tabla (se llama al pasar el ratón; el resultado se guarda en caché).</summary>
+    [Parameter] public Func<string, Task<IReadOnlyList<ColumnInfo>>>? LoadColumns { get; set; }
 
     private string _filter = "";
 
+    // Caché de columnas por tabla. Se vacía cuando cambia la lista de tablas (es decir, al cambiar de esquema).
+    private readonly Dictionary<string, IReadOnlyList<ColumnInfo>> _columnCache = new();
+    private IReadOnlyList<string>? _cachedFor;
+
+    private string? _hovered;
+    private IReadOnlyList<ColumnInfo>? _columns;
+    private string? _loadError;
+    private double _top;
+
     private IEnumerable<string> Filtered =>
         Tables.Where(t => t.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_cachedFor, Tables))
+        {
+            _columnCache.Clear();
+            _cachedFor = Tables;
+        }
+    }
+
+    private async Task ShowColumnsAsync(string table, MouseEventArgs e)
+    {
+        _hovered = table;
+        _columns = null;
+        _loadError = null;
+        _top = Math.Max(8, e.ClientY - 16);
+
+        if (_columnCache.TryGetValue(table, out var cached))
+        {
+            _columns = cached;
+            return;
+        }
+
+        if (LoadColumns is null)
+            return;
+
+        // Se muestra «Cargando…» antes de esperar a la base de datos.
+        StateHasChanged();
+        try
+        {
+            var columns = await LoadColumns(table);
+            _columnCache[table] = columns;
+            if (_hovered == table)
+                _columns = columns;
+        }
+        catch (Exception ex)
+        {
+            if (_hovered == table)
+                _loadError = $"No se pudieron leer las columnas: {ex.Message}";
+        }
+    }
+
+    private void HideColumns()
+    {
+        _hovered = null;
+        _columns = null;
+        _loadError = null;
+    }
 }

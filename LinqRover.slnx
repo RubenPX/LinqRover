@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/LinqRover.Core/LinqRover.Core.csproj" />
+    <Project Path="src/LinqRover.QueryBuilder/LinqRover.QueryBuilder.csproj" />
     <Project Path="src/LinqRover/LinqRover.csproj" />
   </Folder>
 </Solution>

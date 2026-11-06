@@ -1,0 +1,377 @@
+<div class="flex flex-col gap-3 text-sm">
+    @if (Sources.Count == 0)
+    {
+        <p class="opacity-60">Añade tablas al diagrama para diseñar la consulta.</p>
+    }
+    else
+    {
+        <div class="text-xs opacity-60">Tabla base: <span class="font-mono-sql">@Sources[0].Table</span></div>
+
+        <CollapsibleSection Title="Select" DefaultExpanded="true">
+            @foreach (var source in Sources)
+            {
+                <div class="text-xs font-mono-sql opacity-60">@source.Table</div>
+                @foreach (var column in source.Columns)
+                {
+                    var reference = new ColumnRef(source.Id, column.Name);
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="checkbox checkbox-xs" checked="@_select.Contains(reference)"
+                               @onchange="e => SetSelected(reference, e.Value is true)" />
+                        <span class="font-mono-sql text-xs">@column.Name</span>
+                    </label>
+                }
+            }
+
+            @if (_select.Count > 0)
+            {
+                <div class="text-xs opacity-60 mt-2">Orden de columnas</div>
+                @foreach (var (reference, index) in _select.Select((r, i) => (r, i)))
+                {
+                    <div class="flex items-center gap-1">
+                        <span class="flex-1 font-mono-sql text-xs truncate">@($"{SourceName(reference)}.{reference.Column}")</span>
+                        <button class="btn btn-ghost btn-xs" aria-label="Subir columna" title="Subir"
+                                disabled="@(index == 0)" @onclick="() => MoveSelect(reference, -1)">↑</button>
+                        <button class="btn btn-ghost btn-xs" aria-label="Bajar columna" title="Bajar"
+                                disabled="@(index == _select.Count - 1)" @onclick="() => MoveSelect(reference, 1)">↓</button>
+                    </div>
+                }
+            }
+        </CollapsibleSection>
+
+        <CollapsibleSection Title="Where" DefaultExpanded="true">
+            <Actions>
+                <button class="btn btn-ghost btn-xs" @onclick="() => _where.Add(new WhereRow())">+ Condición</button>
+            </Actions>
+            <ChildContent>
+                @foreach (var (row, index) in _where.Select((r, i) => (r, i)))
+                {
+                    <div class="flex flex-col gap-1 rounded-box border border-base-300 p-2">
+                        <div class="flex items-center gap-1">
+                            <span class="text-xs opacity-60 flex-1">Condición @(index + 1)</span>
+                            <button class="btn btn-ghost btn-xs" aria-label="Subir condición" title="Subir"
+                                    disabled="@(index == 0)" @onclick="() => MoveWhere(row, -1)">↑</button>
+                            <button class="btn btn-ghost btn-xs" aria-label="Bajar condición" title="Bajar"
+                                    disabled="@(index == _where.Count - 1)" @onclick="() => MoveWhere(row, 1)">↓</button>
+                        </div>
+                        @if (index > 0)
+                        {
+                            <select class="select select-xs" @bind="row.Connector">
+                                <option value="AND">Y (AND)</option>
+                                <option value="OR">O (OR)</option>
+                            </select>
+                        }
+                        <select class="select select-xs font-mono-sql" @bind="row.ColumnKey">
+                            <option value="">Columna…</option>
+                            @foreach (var source in Sources)
+                            {
+                                @foreach (var column in source.Columns)
+                                {
+                                    <option value="@Key(source.Id, column.Name)">@($"{source.Table}.{column.Name}")</option>
+                                }
+                            }
+                        </select>
+                        <div class="flex gap-1">
+                            <select class="select select-xs flex-1" @bind="row.Op">
+                                @foreach (var op in Enum.GetValues<FilterOperator>())
+                                {
+                                    <option value="@op">@OperatorLabel(op)</option>
+                                }
+                            </select>
+                            <input class="input input-xs flex-1 font-mono-sql" placeholder="Valor" @bind="row.Value"
+                                   disabled="@IsNullOperator(row.Op)" />
+                        </div>
+                        <button class="btn btn-ghost btn-xs self-end" @onclick="() => _where.Remove(row)">Quitar</button>
+                    </div>
+                }
+            </ChildContent>
+        </CollapsibleSection>
+
+        <CollapsibleSection Title="GroupBy">
+            @foreach (var source in Sources)
+            {
+                <div class="text-xs font-mono-sql opacity-60">@source.Table</div>
+                @foreach (var column in source.Columns)
+                {
+                    var reference = new ColumnRef(source.Id, column.Name);
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="checkbox checkbox-xs" checked="@_groupBy.Contains(reference)"
+                               @onchange="e => Toggle(_groupBy, reference, e.Value is true)" />
+                        <span class="font-mono-sql text-xs">@column.Name</span>
+                    </label>
+                }
+            }
+        </CollapsibleSection>
+
+        <CollapsibleSection Title="Agregaciones">
+            <Actions>
+                <button class="btn btn-ghost btn-xs" @onclick="() => _aggs.Add(new AggRow())">+ Agregación</button>
+            </Actions>
+            <ChildContent>
+                @foreach (var row in _aggs)
+                {
+                    <div class="flex flex-col gap-1 rounded-box border border-base-300 p-2">
+                        <div class="flex gap-1">
+                            <select class="select select-xs w-24" @bind="row.Function">
+                                @foreach (var fn in Enum.GetValues<AggregateFunction>())
+                                {
+                                    <option value="@fn">@fn.ToString().ToUpperInvariant()</option>
+                                }
+                            </select>
+                            <select class="select select-xs flex-1 font-mono-sql" @bind="row.ColumnKey">
+                                <option value="">@(row.Function == AggregateFunction.Count ? "(todas las filas)" : "Columna…")</option>
+                                @foreach (var source in Sources)
+                                {
+                                    @foreach (var column in source.Columns)
+                                    {
+                                        <option value="@Key(source.Id, column.Name)">@($"{source.Table}.{column.Name}")</option>
+                                    }
+                                }
+                            </select>
+                        </div>
+                        <div class="flex gap-1 items-center">
+                            <span class="text-xs opacity-60">Alias</span>
+                            <input class="input input-xs flex-1 font-mono-sql" placeholder="(automático)" @bind="row.Alias" />
+                            <button class="btn btn-ghost btn-xs" @onclick="() => _aggs.Remove(row)">Quitar</button>
+                        </div>
+                    </div>
+                }
+            </ChildContent>
+        </CollapsibleSection>
+
+        <CollapsibleSection Title="Skip / Take / Limit">
+            <div class="grid grid-cols-3 gap-2">
+                <label class="flex flex-col gap-1 text-xs">Skip <input class="input input-xs" @bind="_skip" placeholder="—" /></label>
+                <label class="flex flex-col gap-1 text-xs">Take <input class="input input-xs" @bind="_take" placeholder="—" /></label>
+                <label class="flex flex-col gap-1 text-xs">Limit <input class="input input-xs" @bind="_limit" placeholder="—" /></label>
+            </div>
+        </CollapsibleSection>
+    }
+
+    <div class="flex flex-col gap-2">
+        <button class="btn btn-sm" disabled="@(Sources.Count == 0)" @onclick="GenerateSql">Generar SQL</button>
+        <button class="btn btn-sm" disabled="@(Sources.Count == 0)" @onclick="GenerateEf">Generar EF Script</button>
+        <button class="btn btn-sm btn-primary" disabled="@(Sources.Count == 0 || Busy)" @onclick="ExecuteAsync">Ejecutar consulta</button>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div role="alert" class="alert alert-error alert-soft text-xs py-2 whitespace-pre-wrap">@_error</div>
+    }
+
+    @* El SQL o el EF generado se muestra en un modal (ancho según el contenido, máximo 90%). *@
+    @if (_output is not null)
+    {
+        <div class="modal modal-open" role="dialog" aria-modal="true">
+            <div class="modal-box w-auto min-w-fit max-w-[90vw] flex flex-col gap-3">
+                <div class="flex items-center justify-between gap-6">
+                    <h3 class="font-bold">@(_outputIsSql ? "SQL generado" : "EF Script generado")</h3>
+                    <button class="btn btn-ghost btn-sm" aria-label="Cerrar" @onclick="CloseOutput">✕</button>
+                </div>
+                <pre class="overflow-auto max-h-[70vh] text-xs font-mono-sql whitespace-pre">@_output</pre>
+                <div class="modal-action mt-0">
+                    <button class="btn btn-sm" @onclick="CloseOutput">Cerrar</button>
+                </div>
+            </div>
+            <div class="modal-backdrop" @onclick="CloseOutput"></div>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Tablas del diagrama. La primera es la base de la consulta.</summary>
+    [Parameter] public IReadOnlyList<QuerySource> Sources { get; set; } = [];
+    /// <summary>Enlaces entre columnas del diagrama. Cada uno es un INNER JOIN.</summary>
+    [Parameter] public IReadOnlyList<QueryJoin> Joins { get; set; } = [];
+    [Parameter, EditorRequired] public DatabaseEngine Engine { get; set; }
+    /// <summary>Recibe el SQL generado al pulsar «Ejecutar consulta».</summary>
+    [Parameter] public EventCallback<string> OnExecute { get; set; }
+    [Parameter] public bool Busy { get; set; }
+
+    // Lista ordenada: el orden es el de las columnas en el SELECT y en el EF.
+    private readonly List<ColumnRef> _select = [];
+    private readonly HashSet<ColumnRef> _groupBy = [];
+    private readonly List<WhereRow> _where = [];
+    private readonly List<AggRow> _aggs = [];
+    private string _skip = "";
+    private string _take = "";
+    private string _limit = "";
+
+    private string? _output;
+    private bool _outputIsSql;
+    private string? _error;
+
+    private sealed class WhereRow
+    {
+        public string ColumnKey { get; set; } = "";
+        public FilterOperator Op { get; set; } = FilterOperator.Equals;
+        public string Value { get; set; } = "";
+        public string Connector { get; set; } = "AND";
+    }
+
+    private sealed class AggRow
+    {
+        public AggregateFunction Function { get; set; } = AggregateFunction.Count;
+        public string ColumnKey { get; set; } = "";
+        public string Alias { get; set; } = "";
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Si una tabla se quita del diagrama, sus columnas dejan de existir en el formulario.
+        _select.RemoveAll(r => !Exists(r));
+        _groupBy.RemoveWhere(r => !Exists(r));
+        foreach (var row in _where)
+            if (!(ParseKey(row.ColumnKey) is { } r && Exists(r)))
+                row.ColumnKey = "";
+        foreach (var row in _aggs)
+            if (!(ParseKey(row.ColumnKey) is { } r && Exists(r)))
+                row.ColumnKey = "";
+    }
+
+    private bool Exists(ColumnRef reference) =>
+        Sources.Any(s => s.Id == reference.SourceId && s.Columns.Any(c => c.Name == reference.Column));
+
+    private IEnumerable<ColumnRef> AllColumns() =>
+        Sources.SelectMany(s => s.Columns.Select(c => new ColumnRef(s.Id, c.Name)));
+
+    private QueryDesign BuildDesign()
+    {
+        var select = _select.ToList();
+        var groupBy = AllColumns().Where(_groupBy.Contains).ToList();
+
+        // El orden de la lista es el orden de las condiciones (y de sus conectores AND/OR).
+        var where = _where.Select(row => new WhereItem(
+            ParseKey(row.ColumnKey) ?? throw new QueryDesignException("Elige una columna en cada condición del Where."),
+            row.Op,
+            row.Value,
+            row.Connector == "OR")).ToList();
+
+        var aggregates = _aggs.Select((row, i) => new AggregateItem(
+            row.Function,
+            ParseKey(row.ColumnKey),
+            string.IsNullOrWhiteSpace(row.Alias)
+                ? $"{row.Function.ToString().ToLowerInvariant()}{i + 1}"
+                : row.Alias.Trim())).ToList();
+
+        return new QueryDesign(
+            Sources,
+            Joins,
+            select,
+            where,
+            groupBy,
+            aggregates,
+            ParseInt(_skip, "Skip"),
+            ParseInt(_take, "Take"),
+            ParseInt(_limit, "Limit"));
+    }
+
+    private void SetSelected(ColumnRef reference, bool on)
+    {
+        if (on && !_select.Contains(reference)) _select.Add(reference);
+        else if (!on) _select.Remove(reference);
+    }
+
+    private void MoveSelect(ColumnRef reference, int delta)
+    {
+        var index = _select.IndexOf(reference);
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= _select.Count)
+            return;
+
+        (_select[index], _select[target]) = (_select[target], _select[index]);
+    }
+
+    private string SourceName(ColumnRef reference) =>
+        Sources.FirstOrDefault(s => s.Id == reference.SourceId)?.Table ?? "?";
+
+    private void MoveWhere(WhereRow row, int delta)
+    {
+        var index = _where.IndexOf(row);
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= _where.Count)
+            return;
+
+        (_where[index], _where[target]) = (_where[target], _where[index]);
+    }
+
+    private void GenerateSql() => TryBuild(() =>
+    {
+        _output = QueryDesignSql.Build(Engine, BuildDesign());
+        _outputIsSql = true;
+    });
+
+    private void GenerateEf() => TryBuild(() =>
+    {
+        _output = QueryDesignLinq.Build(Engine, BuildDesign());
+        _outputIsSql = false;
+    });
+
+    private async Task ExecuteAsync()
+    {
+        try
+        {
+            // Ejecutar siempre usa el SQL, aunque el usuario haya pedido EF Script.
+            var sql = QueryDesignSql.Build(Engine, BuildDesign());
+            _error = null;
+            await OnExecute.InvokeAsync(sql);
+        }
+        catch (QueryDesignException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void CloseOutput() => _output = null;
+
+    private void TryBuild(Action build)
+    {
+        try
+        {
+            _error = null;
+            build();
+        }
+        catch (QueryDesignException ex)
+        {
+            _error = ex.Message;
+            _output = null;
+        }
+    }
+
+    private static void Toggle(HashSet<ColumnRef> set, ColumnRef reference, bool on)
+    {
+        if (on) set.Add(reference);
+        else set.Remove(reference);
+    }
+
+    private static string Key(string sourceId, string column) => sourceId + "|" + column;
+
+    private static ColumnRef? ParseKey(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return null;
+        var bar = key.IndexOf('|');
+        return bar < 0 ? null : new ColumnRef(key[..bar], key[(bar + 1)..]);
+    }
+
+    private static int? ParseInt(string text, string name)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return int.TryParse(text.Trim(), out var value)
+            ? value
+            : throw new QueryDesignException($"{name} debe ser un número entero.");
+    }
+
+    private static bool IsNullOperator(FilterOperator op) => op is FilterOperator.IsNull or FilterOperator.IsNotNull;
+
+    private static string OperatorLabel(FilterOperator op) => op switch
+    {
+        FilterOperator.Equals => "= igual",
+        FilterOperator.NotEquals => "≠ distinto",
+        FilterOperator.Greater => "> mayor",
+        FilterOperator.GreaterOrEqual => "≥ mayor o igual",
+        FilterOperator.Less => "< menor",
+        FilterOperator.LessOrEqual => "≤ menor o igual",
+        FilterOperator.Like => "LIKE (texto)",
+        FilterOperator.IsNull => "es NULL",
+        _ => "no es NULL",
+    };
+}

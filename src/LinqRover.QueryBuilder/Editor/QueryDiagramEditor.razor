@@ -1,0 +1,153 @@
+<div class="h-full min-h-0 flex flex-col gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+        @if (_error is not null)
+        {
+            <span class="text-xs text-error">@_error</span>
+        }
+    </div>
+
+    <div class="flex-1 min-h-0 flex gap-3">
+        <div class="flex-1 min-w-0 min-h-0 flex flex-col gap-2">
+            <div @ref="_zone" class="flex-1 min-h-0 border border-base-300 rounded-box overflow-hidden relative">
+                <CascadingValue Value="_diagram">
+                    <DiagramCanvas Class="h-full w-full" />
+                </CascadingValue>
+            </div>
+
+            <div class="max-h-28 overflow-y-auto text-xs font-mono-sql">
+                @if (!JoinLabels.Any())
+                {
+                    <span class="opacity-60">Sin relaciones.</span>
+                }
+                @foreach (var label in JoinLabels)
+                {
+                    <div>@label</div>
+                }
+            </div>
+
+            @* Resultados de la última ejecución, debajo del diagrama. Sin contenido no ocupa alto. *@
+            @if (ShowResult && ResultContent is not null)
+            {
+                <div class="shrink-0 h-72 min-h-0 flex flex-col">
+                    @ResultContent
+                </div>
+            }
+        </div>
+
+        @* Panel de consulta: ocupa todo el alto de la zona y hace scroll por dentro. *@
+        <aside class="w-80 shrink-0 h-full min-h-0 overflow-y-auto card bg-base-100 border border-base-300">
+            <div class="card-body p-3">
+                <QueryDesignPanel Sources="@QuerySources" Joins="@QueryJoins" Engine="Engine"
+                                  OnExecute="OnExecute" Busy="Busy" />
+            </div>
+        </aside>
+    </div>
+</div>
+
+@code {
+    /// <summary>Esquema de las tablas.</summary>
+    [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    /// <summary>Motor de la conexión: decide el SQL y los literales que genera el formulario.</summary>
+    [Parameter, EditorRequired] public DatabaseEngine Engine { get; set; }
+    /// <summary>Carga las columnas de una tabla del esquema.</summary>
+    [Parameter, EditorRequired] public Func<string, Task<IReadOnlyList<ColumnInfo>>> LoadColumns { get; set; } = default!;
+    /// <summary>Recibe el SQL que se quiere ejecutar desde el formulario.</summary>
+    [Parameter] public EventCallback<string> OnExecute { get; set; }
+    /// <summary>true mientras se ejecuta la consulta.</summary>
+    [Parameter] public bool Busy { get; set; }
+    /// <summary>Resultado de la última ejecución, que se muestra debajo del diagrama.</summary>
+    [Parameter] public RenderFragment? ResultContent { get; set; }
+    /// <summary>true si hay algo que mostrar (estado, error o resultados). Sin contenido, el bloque no ocupa alto.</summary>
+    [Parameter] public bool ShowResult { get; set; }
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private BlazorDiagram _diagram = default!;
+    private ElementReference _zone;
+    private DotNetObjectReference<QueryDiagramEditor>? _dotNet;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        var options = new BlazorDiagramOptions { AllowMultiSelection = false };
+        // Los enlaces se crean arrastrando entre puertos con el estilo por defecto de la librería.
+        _diagram = new BlazorDiagram(options);
+
+        _diagram.RegisterComponent<TableNodeModel, TableNode>();
+        _diagram.Links.Added += OnLinkAdded;
+        _diagram.Links.Removed += _ => InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // La zona recibe las tablas que se suelten desde la lista (ver js/drag-drop.js).
+        _dotNet = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("lrDrag.register", _zone, _dotNet);
+    }
+
+    private void OnLinkAdded(BaseLinkModel link)
+    {
+        // Al conectar el destino se actualiza la lista de relaciones.
+        link.TargetAttached += _ => InvokeAsync(StateHasChanged);
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Llamado desde js/drag-drop.js al soltar una tabla sobre la zona del editor.</summary>
+    [JSInvokable]
+    public async Task OnTableDropped(string table, double clientX, double clientY)
+    {
+        // La esquina superior izquierda del nodo queda cerca del puntero.
+        var pointer = _diagram.GetRelativeMousePoint(clientX, clientY);
+        await AddTableAtAsync(table, new Point(pointer.X - 20, pointer.Y - 10));
+    }
+
+    private async Task AddTableAtAsync(string table, Point position)
+    {
+        try
+        {
+            var columns = await LoadColumns(table);
+            _diagram.Nodes.Add(new TableNodeModel(position, Schema, table, columns));
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Tablas del diagrama, en el orden en que se añadieron. La primera es la base de la consulta.</summary>
+    private IReadOnlyList<QuerySource> QuerySources =>
+        _diagram.Nodes.OfType<TableNodeModel>()
+            .Select(n => new QuerySource(n.Id, n.Schema, n.Table, n.Columns))
+            .ToList();
+
+    /// <summary>Enlaces entre columnas del diagrama. Cada uno es un INNER JOIN.</summary>
+    private IReadOnlyList<QueryJoin> QueryJoins =>
+        _diagram.Links
+            .Select(l => (Source: l.Source?.Model as ColumnPort, Target: l.Target?.Model as ColumnPort))
+            .Where(p => p.Source is not null && p.Target is not null)
+            .Select(p => new QueryJoin(RefOf(p.Source!), RefOf(p.Target!)))
+            .ToList();
+
+    /// <summary>Condiciones de unión de los enlaces entre columnas, tipo «TABLA.COL = OTRA.COL».</summary>
+    private IEnumerable<string> JoinLabels =>
+        QueryJoins.Select(j => $"{TableOf(j.Left)}.{j.Left.Column} = {TableOf(j.Right)}.{j.Right.Column}");
+
+    private static ColumnRef RefOf(ColumnPort port) => new(port.Parent?.Id ?? "", port.Column);
+
+    private string TableOf(ColumnRef reference) =>
+        QuerySources.FirstOrDefault(s => s.Id == reference.SourceId)?.Table ?? "?";
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("lrDrag.unregister", _zone);
+        }
+        catch (JSDisconnectedException) { }
+        _dotNet?.Dispose();
+    }
+}
