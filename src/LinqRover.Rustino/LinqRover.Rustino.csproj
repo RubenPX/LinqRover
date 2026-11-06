@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableDefaultItems>false</EnableDefaultItems>
     <SatelliteResourceLanguages>es-ES</SatelliteResourceLanguages>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320">
+  <rect width="1280" height="320" fill="#1f1f1f"/>
+  <rect y="312" width="1280" height="8" fill="#0078d4"/>
+
+  <!-- Diagrama de ejemplo: CLIENTES 1..N PEDIDOS 1..N PEDIDO_LINEAS -->
+  <g font-family="Consolas, monospace" font-size="14">
+    <!-- Relaciones: PK -> FK (líneas ortogonales, de borde a borde) -->
+    <g stroke="#2aaaff" stroke-width="2" fill="none">
+      <path d="M1070 84 H1080 V102 H1090"/>
+      <path d="M1170 140 V190"/>
+    </g>
+    <g fill="#2aaaff">
+      <circle cx="1070" cy="84" r="3.5"/>
+      <circle cx="1090" cy="102" r="3.5"/>
+      <circle cx="1170" cy="140" r="3.5"/>
+      <circle cx="1170" cy="190" r="3.5"/>
+    </g>
+
+    <!-- CLIENTES -->
+    <rect x="900" y="40" width="170" height="100" rx="6" fill="#181818" stroke="#454545" stroke-width="2"/>
+    <path d="M900 46 a6 6 0 0 1 6 -6 h158 a6 6 0 0 1 6 6 v22 h-170 z" fill="#0078d4"/>
+    <text x="916" y="59" fill="#ffffff" font-weight="bold">CLIENTES</text>
+    <text x="916" y="86" fill="#cccccc">ID_CLIENTE  PK</text>
+    <text x="916" y="108" fill="#cccccc">NOMBRE_CLIENTE</text>
+
+    <!-- PEDIDOS -->
+    <rect x="1090" y="40" width="160" height="100" rx="6" fill="#181818" stroke="#454545" stroke-width="2"/>
+    <path d="M1090 46 a6 6 0 0 1 6 -6 h148 a6 6 0 0 1 6 6 v22 h-160 z" fill="#0078d4"/>
+    <text x="1106" y="59" fill="#ffffff" font-weight="bold">PEDIDOS</text>
+    <text x="1106" y="86" fill="#cccccc">ID_PEDIDO  PK</text>
+    <text x="1106" y="108" fill="#cccccc">ID_CLIENTE  FK</text>
+
+    <!-- PEDIDO_LINEAS -->
+    <rect x="1090" y="190" width="160" height="100" rx="6" fill="#181818" stroke="#454545" stroke-width="2"/>
+    <path d="M1090 196 a6 6 0 0 1 6 -6 h148 a6 6 0 0 1 6 6 v22 h-160 z" fill="#0078d4"/>
+    <text x="1106" y="209" fill="#ffffff" font-weight="bold">PEDIDO_LINEAS</text>
+    <text x="1106" y="236" fill="#cccccc">ID_PEDIDO  FK</text>
+    <text x="1106" y="258" fill="#cccccc">CANTIDAD</text>
+  </g>
+
+  <!-- Icono a la izquierda -->
+  <g transform="translate(70 60) scale(0.625)">
+    <rect width="256" height="256" rx="52" fill="#181818"/>
+    <g fill="none" stroke="#0078d4" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="128" cy="78" rx="70" ry="26"/>
+      <path d="M58 78v100c0 14.4 31.3 26 70 26s70-11.6 70-26V78"/>
+      <path d="M58 128c0 14.4 31.3 26 70 26s70-11.6 70-26"/>
+    </g>
+  </g>
+  <text x="252" y="150" font-family="Segoe UI, system-ui, sans-serif" font-size="84" font-weight="300" fill="#ffffff">LinqRover</text>
+  <text x="256" y="198" font-family="Segoe UI, system-ui, sans-serif" font-size="24" fill="#9d9d9d">IDE de consultas de solo lectura para Oracle y SQL Server</text>
+</svg>
