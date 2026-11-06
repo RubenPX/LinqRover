@@ -66,14 +66,16 @@ LR_TRUST_CERT=1
 
 ## Publicar
 
-Los scripts publican la aplicación en `./build` como **ejecutable único autocontenido** (incluye el runtime de .NET, no hace falta instalarlo), en Release y sin archivos `.pdb`:
+Los scripts publican la aplicación en `./build` como **ejecutable autocontenido** (incluye el runtime de .NET, no hace falta instalarlo), en Release y sin archivos `.pdb`:
 
 ```bash
 ./publish.sh          # Git Bash / Linux
 publish.cmd           # Windows (CMD o Explorador)
 ```
 
-Para el archivo único se usa `PublishSingleFile`; `wwwroot` queda junto al ejecutable.
+Se publica **sin archivo único** (`PublishSingleFile=false`). Roslyn necesita rutas reales a los ensamblados para compilar los scripts de EF, y en un archivo único no existen. Por eso, tras publicar, `publish-libs.ps1` deja en `./build` solo `LinqRover.Rustino.exe` y mueve el resto (DLL, `wwwroot`, etc.) a `./build/libs`. Además parchea el ejecutable para que cargue `libs\LinqRover.Rustino.dll` (mismo método que usa dnSpy). Hay que distribuir la carpeta `build` completa, no solo el `.exe`.
+
+Antes de publicar, los scripts compilan Tailwind (`npm run build:css` en `src/LinqRover.Rustino`) para que `wwwroot/css/app.css` incluya todas las clases usadas. Si no existe `node_modules`, ejecutan `npm ci` primero, así que hace falta tener Node.js instalado.
 
 ## Dónde se guardan las conexiones
 

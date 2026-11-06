@@ -1,4 +1,6 @@
 @using LinqRover.QueryBuilder.Editor
+@using LinqRover.Services
+@implements IDisposable
 
 <div class="h-full min-h-0 flex flex-col gap-2 @(Active ? "" : "hidden")">
     @* Editor arriba y resultados abajo, con una barra para cambiar su altura. Sin resultados, el editor ocupa todo. *@
@@ -31,9 +33,15 @@
                     @switch (_completionState)
                     {
                         case CompletionState.Preparing:
-                            <div class="shrink-0 flex items-center gap-1 text-xs opacity-70">
-                                <span class="loading loading-spinner loading-xs"></span>
-                                Preparando el autocompletado (Roslyn)…
+                            <div class="shrink-0 flex flex-col gap-1 text-xs opacity-70">
+                                <div class="flex items-center gap-1">
+                                    <span class="loading loading-spinner loading-xs"></span>
+                                    <span>@PreparingText()</span>
+                                </div>
+                                @if (_progress?.Current is { Total: > 0 } snap)
+                                {
+                                    <progress class="progress progress-primary w-full h-1" value="@snap.Done" max="@snap.Total"></progress>
+                                }
                             </div>
                             break;
                         case CompletionState.Failed:
@@ -142,9 +150,11 @@
     private async Task PrepareCompletionAsync()
     {
         _completionState = CompletionState.Preparing;
+        var (task, progress) = new Services.ScriptService(Providers).PrepareCompletion(Profile, Schema);
+        Observe(progress);
         try
         {
-            await new Services.ScriptService(Providers).PrepareCompletionAsync(Profile, Schema);
+            await task;
             _completionState = CompletionState.Ready;
         }
         catch (Exception ex)
@@ -152,7 +162,52 @@
             _completionState = CompletionState.Failed;
             _completionError = ex.Message;
         }
-        await InvokeAsync(StateHasChanged);
+        finally
+        {
+            Unobserve();
+        }
+        if (!_disposed)
+            await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Progreso de la preparación del autocompletado (null si ya estaba en caché).</summary>
+    private LoadProgress? _progress;
+    private bool _disposed;
+
+    private void Observe(LoadProgress? progress)
+    {
+        if (progress is null) return;
+        _progress = progress;
+        progress.Changed += OnProgressChanged;
+    }
+
+    private void Unobserve()
+    {
+        if (_progress is not null)
+            _progress.Changed -= OnProgressChanged;
+        _progress = null;
+    }
+
+    private void OnProgressChanged()
+    {
+        if (!_disposed)
+            _ = InvokeAsync(StateHasChanged);
+    }
+
+    private string PreparingText()
+    {
+        var snap = _progress?.Current;
+        if (snap is null || snap.Stage.Length == 0)
+            return "Preparando el autocompletado (Roslyn)…";
+        return snap.Total > 0
+            ? $"{snap.Stage} {snap.Done} / {snap.Total}"
+            : snap.Stage;
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Unobserve();
     }
 
     // ---- SQL ----

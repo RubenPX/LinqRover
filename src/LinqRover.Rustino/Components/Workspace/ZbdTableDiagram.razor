@@ -15,7 +15,16 @@
     }
     else if (_diagram is null)
     {
-        <span class="loading loading-spinner loading-sm"></span>
+        <div class="flex flex-col gap-2 text-xs opacity-70">
+            <div class="flex items-center gap-2">
+                <span class="loading loading-spinner loading-sm"></span>
+                <span>@LoadingText()</span>
+            </div>
+            @if (_loadTotal > 0)
+            {
+                <progress class="progress progress-primary w-64 h-1" value="@_loadDone" max="@_loadTotal"></progress>
+            }
+        </div>
     }
     else
     {
@@ -52,6 +61,10 @@
     private string? _error;
     private string? _loadedKey;
 
+    // Progreso de la carga: columnas leídas de las tablas del diagrama (0 total = aún no se conocen las relaciones).
+    private int _loadDone;
+    private int _loadTotal;
+
     protected override async Task OnParametersSetAsync()
     {
         var key = $"{Schema}.{Table}";
@@ -60,10 +73,15 @@
         await LoadAsync();
     }
 
+    private string LoadingText() =>
+        _loadTotal > 0 ? $"Leyendo columnas {_loadDone} / {_loadTotal}" : "Leyendo relaciones…";
+
     private async Task LoadAsync()
     {
         _error = null;
         _diagram = null;
+        _loadDone = 0;
+        _loadTotal = 0;
         try
         {
             var provider = Providers.Get(Profile.Engine);
@@ -74,9 +92,14 @@
             if (!tables.Any(t => DiagramLayout.KeyOf(t) == DiagramLayout.KeyOf(center)))
                 tables.Add(center);
 
+            _loadTotal = tables.Count;
             var columns = new Dictionary<string, IReadOnlyList<ColumnInfo>>();
             foreach (var t in tables)
+            {
                 columns[DiagramLayout.KeyOf(t)] = await ColumnsAsync(provider, t);
+                _loadDone++;
+                StateHasChanged();
+            }
 
             // Posiciones y columnas visibles: se reutiliza la misma disposición que en la versión SVG.
             _refs = refs;
