@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 set "OUT=%~dp0build"
 
-dotnet publish "src\LinqRover.Rustino\LinqRover.Rustino.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o "%OUT%"
+dotnet publish "src\LinqRover.Rustino\LinqRover.Rustino.csproj" -c Release -p:DebugType=None -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o "%OUT%"
 if errorlevel 1 (
     echo.
     echo Error al publicar LinqRover.

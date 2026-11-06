@@ -4,11 +4,13 @@ using LinqRover.Core.Storage;
 using LinqRover.Services;
 using Rustino.Blazor;
 
-// Mismo sitio que la app de MAUI, para que las conexiones guardadas sigan visibles.
-var profilePath = Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "User Name", "com.companyname.linqrover", "Data", "connections.json");
-Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
+// Perfiles de conexión: (carpeta del ejecutable)/profiles/(usuario de Windows).json
+// Se usa la carpeta del ejecutable y no AppContext.BaseDirectory: en un archivo único BaseDirectory es una carpeta temporal.
+var profilesDir = Path.Combine(
+    Path.GetDirectoryName(Environment.ProcessPath) ?? Environment.CurrentDirectory,
+    "profiles");
+var profilePath = Path.Combine(profilesDir, $"{Environment.UserName}.json");
+Directory.CreateDirectory(profilesDir);
 
 var builder = RustinoBlazorAppBuilder.CreateDefault(args);
 var services = builder.Services;
@@ -23,3 +25,6 @@ builder.RootComponents.Add<LinqRover.Components.Routes>("#app");
 var app = builder.Build();
 app.MainWindow.SetTitle("LinqRover").SetSize(1440, 900).SetDevToolsEnabled(true);
 app.Run();
+
+// Al cerrar la ventana, termina todo el proceso (no quedan hilos de la UI ni del host en segundo plano).
+Environment.Exit(0);

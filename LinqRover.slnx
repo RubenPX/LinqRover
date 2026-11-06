@@ -3,6 +3,5 @@
     <Project Path="src/LinqRover.Core/LinqRover.Core.csproj" />
     <Project Path="src/LinqRover.QueryBuilder/LinqRover.QueryBuilder.csproj" />
     <Project Path="src/LinqRover.Rustino/LinqRover.Rustino.csproj" />
-    <Project Path="src/LinqRover/LinqRover.csproj" />
   </Folder>
 </Solution>

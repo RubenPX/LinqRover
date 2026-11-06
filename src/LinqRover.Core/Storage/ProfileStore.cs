@@ -11,7 +11,7 @@ public interface ISecretProtector
     string Unprotect(string protectedText);
 }
 
-/// <summary>Guarda los perfiles en un JSON local. Las contraseñas se almacenan cifradas.</summary>
+/// <summary>Guarda los perfiles en un archivo local cifrado entero (el JSON completo pasa por <see cref="ISecretProtector"/>).</summary>
 public sealed class ProfileStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -83,19 +83,29 @@ public sealed class ProfileStore
         if (!File.Exists(_path))
             return [];
 
-        await using var stream = File.OpenRead(_path);
-        var list = await JsonSerializer.DeserializeAsync<List<StoredProfile>>(stream, JsonOptions, ct);
-        return list ?? [];
+        var content = (await File.ReadAllTextAsync(_path, ct)).Trim();
+
+        // Formato antiguo: JSON en texto plano. Se lee y se reescribe cifrado de inmediato.
+        if (content.StartsWith('['))
+        {
+            var legacy = JsonSerializer.Deserialize<List<StoredProfile>>(content, JsonOptions) ?? [];
+            await WriteAsync(legacy, ct);
+            return legacy;
+        }
+
+        var json = _protector.Unprotect(content);
+        return JsonSerializer.Deserialize<List<StoredProfile>>(json, JsonOptions) ?? [];
     }
 
+    /// <summary>Escribe todo el archivo cifrado (DPAPI del usuario actual). Nada queda en texto plano.</summary>
     private async Task WriteAsync(List<StoredProfile> profiles, CancellationToken ct)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        var json = JsonSerializer.Serialize(profiles, JsonOptions);
+        var encrypted = _protector.Protect(json);
+
         var tmp = _path + ".tmp";
-        await using (var stream = File.Create(tmp))
-        {
-            await JsonSerializer.SerializeAsync(stream, profiles, JsonOptions, ct);
-        }
+        await File.WriteAllTextAsync(tmp, encrypted, ct);
         File.Move(tmp, _path, overwrite: true);
     }
 

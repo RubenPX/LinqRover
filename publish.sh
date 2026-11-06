@@ -7,6 +7,7 @@ OUT="$(pwd)/build"
 
 dotnet publish "src/LinqRover.Rustino/LinqRover.Rustino.csproj" \
   -c Release \
+  -p:DebugType=None \
   -r win-x64 \
   --self-contained true \
   -p:PublishSingleFile=true \

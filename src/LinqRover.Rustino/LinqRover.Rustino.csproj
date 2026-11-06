@@ -9,11 +9,11 @@
     <SatelliteResourceLanguages>es-ES</SatelliteResourceLanguages>
   </PropertyGroup>
 
-  <!-- Interfaz compartida con la app de MAUI (src/LinqRover): se enlazan sus fuentes, no se copian. -->
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="..\LinqRover\Services\**\*.cs" Link="Services\%(RecursiveDir)%(Filename)%(Extension)" />
-    <RazorComponent Include="..\LinqRover\Components\**\*.razor" Link="Components\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="Services\**\*.cs" />
+    <RazorComponent Include="Components\**\*.razor" />
+    <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,20 +27,9 @@
     <ProjectReference Include="..\LinqRover.QueryBuilder\LinqRover.QueryBuilder.csproj" />
   </ItemGroup>
 
-  <!-- Mismos pasos previos al build que la app de MAUI: estilos Tailwind y copia de Monaco -->
+  <!-- Estilos Tailwind y copia de Monaco antes del build (requiere npm install una vez en esta carpeta) -->
   <Target Name="BuildSharedAssets" BeforeTargets="BeforeBuild">
-    <Exec Command="npm run build:css" WorkingDirectory="..\LinqRover" Condition="Exists('..\LinqRover\node_modules')" />
-    <Exec Command="npm run copy:monaco" WorkingDirectory="..\LinqRover" Condition="Exists('..\LinqRover\node_modules') And !Exists('..\LinqRover\wwwroot\lib\monaco\vs\loader.js')" />
-  </Target>
-
-  <!-- wwwroot se genera en este proyecto copiando el de LinqRover (no es un enlace). Se regenera en cada build. -->
-  <Target Name="GenerateWwwroot" BeforeTargets="BeforeBuild">
-    <ItemGroup>
-      <_SharedWww Include="..\LinqRover\wwwroot\**\*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_SharedWww)" DestinationFiles="@(_SharedWww->'wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-    <ItemGroup>
-      <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
-    </ItemGroup>
+    <Exec Command="npm run build:css" Condition="Exists('node_modules')" />
+    <Exec Command="npm run copy:monaco" Condition="Exists('node_modules') And !Exists('wwwroot\lib\monaco\vs\loader.js')" />
   </Target>
 </Project>
