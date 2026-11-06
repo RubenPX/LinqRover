@@ -67,6 +67,8 @@
         _diagram.RegisterComponent<TableNodeModel, TableNode>();
         _diagram.Links.Added += OnLinkAdded;
         _diagram.Links.Removed += _ => InvokeAsync(StateHasChanged);
+        // Al quitar una tabla, el formulario debe enterarse para descartar sus columnas (ver QueryDesignPanel.OnParametersSet).
+        _diagram.Nodes.Removed += _ => InvokeAsync(StateHasChanged);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

@@ -1,0 +1,16 @@
+# Oracle Database 11g Express Edition con datos de ejemplo (usuario TIENDA).
+#
+# Arrancar (tarda unos minutos hasta que la base de datos está lista):
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# Cargar los datos de ejemplo (una vez la base de datos esté arrancada):
+#   docker exec -i -e NLS_LANG=AMERICAN_AMERICA.AL32UTF8 -e ORACLE_HOME=/u01/app/oracle/product/11.2.0/xe -e ORACLE_SID=XE linqrover-oracle-11g bash -c "/u01/app/oracle/product/11.2.0/xe/bin/sqlplus -L -S system/oracle@//localhost:1521/XE" < docker/tienda-oracle.sql
+#
+# Conexión desde LinqRover: host localhost, puerto 1521, servicio XE, usuario TIENDA, contraseña TIENDA.
+services:
+  oracle-11g:
+    image: oracleinanutshell/oracle-xe-11g
+    container_name: linqrover-oracle-11g
+    ports:
+      - "1521:1521"
+    restart: "no"

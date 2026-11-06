@@ -19,6 +19,14 @@ La aplicación es una ventana de escritorio para Windows hecha con .NET 10: la i
 
 **Solo lectura:** las consultas y los scripts se ejecutan dentro de una transacción que siempre se deshace, y `SaveChanges` está bloqueado en el contexto de EF. Las consultas SQL que parecen modificar datos piden confirmación antes de ejecutarse.
 
+## Capturas
+
+Editor visual sobre la base de datos de ejemplo «Tienda» (Oracle 11g): tablas unidas por sus claves, columnas seleccionadas, una agregación (`SUM` de cantidades por pedido) y el resultado debajo.
+
+<p align="center">
+  <img src="docs/assets/editor-visual.png" alt="Editor visual de LinqRover con la tienda de ejemplo" width="100%">
+</p>
+
 ## Requisitos
 
 - Windows 10 (19041) o superior, con el runtime de **WebView2** (viene instalado en Windows 10 y 11).

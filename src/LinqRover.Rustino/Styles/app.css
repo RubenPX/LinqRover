@@ -251,6 +251,8 @@ h1:focus-visible {
 
 .table :where(th, td) {
   border-color: #2b2b2b;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
 }
 
 .table :where(thead th) {
