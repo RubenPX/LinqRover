@@ -7,7 +7,7 @@
     {
         <div class="text-xs opacity-60">Tabla base: <span class="font-mono-sql">@Sources[0].Table</span></div>
 
-        <CollapsibleSection Title="Select" DefaultExpanded="true">
+        <CollapsibleSection Title="Select" DefaultExpanded="true" Summary="@SelectLines()">
             @* Desplegable: el botón muestra cuántas columnas hay elegidas; al abrirlo, una casilla por columna. *@
             <div class="flex flex-col gap-2">
                 <button type="button" class="btn btn-sm vs-select-trigger" aria-haspopup="listbox" aria-expanded="@_selectOpen"
@@ -56,7 +56,7 @@
             }
         </CollapsibleSection>
 
-        <CollapsibleSection Title="Where" DefaultExpanded="true">
+        <CollapsibleSection Title="Where" DefaultExpanded="true" Summary="@WhereLines()">
             <Actions>
                 <button class="btn btn-ghost btn-xs" @onclick="() => _where.Add(new WhereRow())">+ Condición</button>
             </Actions>
@@ -104,7 +104,7 @@
             </ChildContent>
         </CollapsibleSection>
 
-        <CollapsibleSection Title="GroupBy">
+        <CollapsibleSection Title="GroupBy" Summary="@GroupByLines()">
             @foreach (var source in Sources)
             {
                 <div class="text-xs font-mono-sql opacity-60">@source.Table</div>
@@ -120,7 +120,7 @@
             }
         </CollapsibleSection>
 
-        <CollapsibleSection Title="DistinctBy">
+        <CollapsibleSection Title="DistinctBy" Summary="@DistinctByLines()">
             @if (_select.Count == 0)
             {
                 <p class="text-xs opacity-60">Marca primero columnas en Select.</p>
@@ -139,7 +139,7 @@
             }
         </CollapsibleSection>
 
-        <CollapsibleSection Title="Agregaciones">
+        <CollapsibleSection Title="Agregaciones" Summary="@AggregateLines()">
             <Actions>
                 <button class="btn btn-ghost btn-xs" @onclick="() => _aggs.Add(new AggRow())">+ Agregación</button>
             </Actions>
@@ -175,7 +175,36 @@
             </ChildContent>
         </CollapsibleSection>
 
-        <CollapsibleSection Title="Skip / Take / Limit">
+        <CollapsibleSection Title="OrderBy" Summary="@OrderLines()">
+            <Actions>
+                <button class="btn btn-ghost btn-xs" @onclick="() => _order.Add(new OrderRow())">+ Orden</button>
+            </Actions>
+            <ChildContent>
+                @foreach (var (row, index) in _order.Select((r, i) => (r, i)))
+                {
+                    <div class="flex items-center gap-1">
+                        <select class="select select-xs flex-1 font-mono-sql" @bind="row.Alias" aria-label="Columna de orden">
+                            <option value="">Columna…</option>
+                            @foreach (var alias in OutputAliases() ?? Array.Empty<string>())
+                            {
+                                <option value="@alias">@alias</option>
+                            }
+                        </select>
+                        <select class="select select-xs w-20" @bind="row.Direction" aria-label="Dirección">
+                            <option value="ASC">ASC</option>
+                            <option value="DESC">DESC</option>
+                        </select>
+                        <button class="btn btn-ghost btn-xs" aria-label="Subir orden" title="Subir"
+                                disabled="@(index == 0)" @onclick="() => MoveOrder(row, -1)">↑</button>
+                        <button class="btn btn-ghost btn-xs" aria-label="Bajar orden" title="Bajar"
+                                disabled="@(index == _order.Count - 1)" @onclick="() => MoveOrder(row, 1)">↓</button>
+                        <button class="btn btn-ghost btn-xs" @onclick="() => _order.Remove(row)">Quitar</button>
+                    </div>
+                }
+            </ChildContent>
+        </CollapsibleSection>
+
+        <CollapsibleSection Title="Skip / Take / Limit" Summary="@PagingLines()">
             <div class="grid grid-cols-3 gap-2">
                 <label class="flex flex-col gap-1 text-xs">Skip <input class="input input-xs" @bind="_skip" placeholder="—" /></label>
                 <label class="flex flex-col gap-1 text-xs">Take <input class="input input-xs" @bind="_take" placeholder="—" /></label>
@@ -230,6 +259,7 @@
     private readonly HashSet<ColumnRef> _distinctBy = [];
     private readonly List<WhereRow> _where = [];
     private readonly List<AggRow> _aggs = [];
+    private readonly List<OrderRow> _order = [];
     private string _skip = "";
     private string _take = "";
     private string _limit = "";
@@ -253,6 +283,14 @@
         public string Alias { get; set; } = "";
     }
 
+    private sealed class OrderRow
+    {
+        /// <summary>Alias de salida (columna o agregación) por el que se ordena.</summary>
+        public string Alias { get; set; } = "";
+        public string Direction { get; set; } = "ASC";
+        public bool Descending => Direction == "DESC";
+    }
+
     protected override void OnParametersSet()
     {
         // Si una tabla se quita del diagrama, sus columnas dejan de existir en el formulario.
@@ -264,6 +302,36 @@
         foreach (var row in _aggs)
             if (!(ParseKey(row.ColumnKey) is { } r && Exists(r)))
                 row.ColumnKey = "";
+
+        // Un orden deja de valer si su columna o agregación ya no está en la salida.
+        // Solo se poda si el diseño es válido; si está a medias, no se toca.
+        if (OutputAliases() is { } aliases)
+            foreach (var row in _order)
+                if (!aliases.Contains(row.Alias, StringComparer.OrdinalIgnoreCase))
+                    row.Alias = "";
+    }
+
+    /// <summary>Alias de las columnas y agregaciones de salida, para elegir el orden. Null si el diseño aún no es válido.</summary>
+    private IReadOnlyList<string>? OutputAliases()
+    {
+        try
+        {
+            return QueryDesignPlan.Outputs(Engine, BuildDesign(withOrder: false)).Select(o => o.Alias).ToList();
+        }
+        catch (QueryDesignException)
+        {
+            return null;
+        }
+    }
+
+    private void MoveOrder(OrderRow row, int delta)
+    {
+        var index = _order.IndexOf(row);
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= _order.Count)
+            return;
+
+        (_order[index], _order[target]) = (_order[target], _order[index]);
     }
 
     private bool Exists(ColumnRef reference) =>
@@ -272,7 +340,7 @@
     private IEnumerable<ColumnRef> AllColumns() =>
         Sources.SelectMany(s => s.Columns.Select(c => new ColumnRef(s.Id, c.Name)));
 
-    private QueryDesign BuildDesign()
+    private QueryDesign BuildDesign(bool withOrder = true)
     {
         var select = _select.ToList();
         var groupBy = AllColumns().Where(_groupBy.Contains).ToList();
@@ -301,10 +369,57 @@
             ParseInt(_skip, "Skip"),
             ParseInt(_take, "Take"),
             ParseInt(_limit, "Limit"),
-            _select.Where(_distinctBy.Contains).ToList());
+            _select.Where(_distinctBy.Contains).ToList(),
+            withOrder
+                ? _order.Select(row => new OrderItem(
+                        string.IsNullOrEmpty(row.Alias)
+                            ? throw new QueryDesignException("Elige una columna en cada OrderBy.")
+                            : row.Alias,
+                        row.Descending)).ToList()
+                : null);
     }
 
     private bool _selectOpen;
+
+    // ---- Resúmenes de cada sección plegada: solo lo activado ----
+
+    private string Label(ColumnRef reference) => $"{SourceName(reference)}.{reference.Column}";
+
+    private string ColumnLabel(string? key) =>
+        ParseKey(key) is { } reference ? Label(reference) : "(sin columna)";
+
+    private IReadOnlyList<string> SelectLines() => _select.Select(Label).ToList();
+
+    private IReadOnlyList<string> GroupByLines() => _groupBy.Select(Label).ToList();
+
+    private IReadOnlyList<string> DistinctByLines() => _distinctBy.Select(Label).ToList();
+
+    private IReadOnlyList<string> WhereLines() =>
+        _where.Select((row, i) =>
+        {
+            var prefix = i == 0 ? "" : row.Connector + " ";
+            var value = IsNullOperator(row.Op) ? "" : " " + row.Value;
+            return $"{prefix}{ColumnLabel(row.ColumnKey)} {OperatorLabel(row.Op)}{value}";
+        }).ToList();
+
+    private IReadOnlyList<string> AggregateLines() =>
+        _aggs.Select(row =>
+        {
+            var column = ParseKey(row.ColumnKey) is { } reference ? Label(reference) : "*";
+            var alias = string.IsNullOrWhiteSpace(row.Alias) ? "" : " AS " + row.Alias.Trim();
+            return $"{row.Function.ToString().ToUpperInvariant()}({column}){alias}";
+        }).ToList();
+
+    private IReadOnlyList<string> OrderLines() =>
+        _order.Select(row => $"{(string.IsNullOrEmpty(row.Alias) ? "(sin elegir)" : row.Alias)} {row.Direction}").ToList();
+
+    private IReadOnlyList<string> PagingLines() =>
+        new[]
+        {
+            string.IsNullOrWhiteSpace(_skip) ? null : $"Skip {_skip.Trim()}",
+            string.IsNullOrWhiteSpace(_take) ? null : $"Take {_take.Trim()}",
+            string.IsNullOrWhiteSpace(_limit) ? null : $"Limit {_limit.Trim()}",
+        }.OfType<string>().ToList();
 
     private string SelectSummary => _select.Count switch
     {

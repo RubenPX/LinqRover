@@ -18,6 +18,7 @@ public static class QueryDesignSql
         var steps = QueryDesignPlan.PlanJoins(design);
         var outputs = QueryDesignPlan.Outputs(engine, design);
         var baseSource = design.Sources[0];
+        var outputByAlias = outputs.ToDictionary(o => o.Alias, StringComparer.OrdinalIgnoreCase);
 
         string Column(ColumnRef reference) => $"{aliases[reference.SourceId]}.{Quote(engine, reference.Column)}";
 
@@ -29,6 +30,8 @@ public static class QueryDesignSql
             AggregateFunction.Min => $"MIN({Column(a.Column!)})",
             _ => $"MAX({Column(a.Column!)})",
         };
+
+        string Expression(OutputItem o) => o.Column is { } c ? Column(c) : Aggregate(o.Aggregate!);
 
         string Condition(WhereItem item)
         {
@@ -43,7 +46,7 @@ public static class QueryDesignSql
 
         // SELECT: una columna por línea.
         var selectItems = outputs
-            .Select(o => $"{(o.Column is { } c ? Column(c) : Aggregate(o.Aggregate!))} AS {Quote(engine, o.Alias)}")
+            .Select(o => $"{Expression(o)} AS {Quote(engine, o.Alias)}")
             .ToList();
 
         // FROM y JOIN: cada join ocupa tres líneas (tabla, ON, AND adicionales).
@@ -72,7 +75,14 @@ public static class QueryDesignSql
         if (design.GroupBy.Count > 0)
             tail.Add("GROUP BY " + string.Join(", ", design.GroupBy.Select(Column)));
 
-        // DistinctBy: ROW_NUMBER() por cada combinación de claves y se queda con la fila 1 (la primera que aparezca).
+        // OrderBy: por alias de salida. Se usa en el ORDER BY final y, con DistinctBy, en el ROW_NUMBER.
+        var orderBy = design.OrderBy ?? Array.Empty<OrderItem>();
+        var orderAliases = orderBy
+            .Select(o => $"{Quote(engine, outputByAlias[o.Alias].Alias)}{(o.Descending ? " DESC" : "")}")
+            .ToList();
+        var orderLines = orderAliases.Count == 0 ? new List<string>() : new List<string> { "ORDER BY " + string.Join(", ", orderAliases) };
+
+        // DistinctBy: ROW_NUMBER() por cada combinación de claves; se queda con la fila 1 según el orden pedido.
         var distinct = design.DistinctBy ?? Array.Empty<ColumnRef>();
         var items = selectItems;
         var outerFrom = from;
@@ -82,10 +92,12 @@ public static class QueryDesignSql
         {
             var rowNumber = Quote(engine, RowNumberAlias);
             var partition = string.Join(", ", distinct.Select(Column));
-            // Oracle exige ORDER BY dentro de ROW_NUMBER (ORA-30485); cualquier orden vale porque la fila es «la primera».
-            var order = engine == DatabaseEngine.SqlServer ? "(SELECT NULL)" : "NULL";
+            var rowOrder = orderBy.Count == 0
+                ? (engine == DatabaseEngine.SqlServer ? "(SELECT NULL)" : "NULL")
+                : string.Join(", ", orderBy.Select(o =>
+                    Expression(outputByAlias[o.Alias]) + (o.Descending ? " DESC" : "")));
             var inner = Query("SELECT",
-                [.. selectItems, $"ROW_NUMBER() OVER (PARTITION BY {partition} ORDER BY {order}) AS {rowNumber}"],
+                [.. selectItems, $"ROW_NUMBER() OVER (PARTITION BY {partition} ORDER BY {rowOrder}) AS {rowNumber}"],
                 from,
                 tail);
 
@@ -101,9 +113,15 @@ public static class QueryDesignSql
         {
             var top = skip is null && take is not null ? $" TOP ({take})" : "";
             var lines = Query($"SELECT{top}", items, outerFrom, outerTail);
+
+            // OFFSET/FETCH exige ORDER BY: el pedido, o uno neutro si no hay OrderBy.
+            if (orderLines.Count > 0)
+                lines.AddRange(orderLines);
+            else if (skip is not null)
+                lines.Add("ORDER BY (SELECT NULL)");
+
             if (skip is not null)
             {
-                lines.Add("ORDER BY (SELECT NULL)");
                 lines.Add($"OFFSET {skip} ROWS");
                 if (take is not null)
                     lines.Add($"FETCH NEXT {take} ROWS ONLY");
@@ -111,8 +129,8 @@ public static class QueryDesignSql
             return string.Join("\n", lines);
         }
 
-        // Oracle 11g no tiene OFFSET/FETCH: se usa ROWNUM.
-        var query = string.Join("\n", Query("SELECT", items, outerFrom, outerTail));
+        // Oracle 11g no tiene OFFSET/FETCH: se usa ROWNUM sobre la consulta ordenada.
+        var query = string.Join("\n", Query("SELECT", items, [.. outerFrom], [.. outerTail, .. orderLines]));
         if (skip is null)
         {
             if (take is null) return query;

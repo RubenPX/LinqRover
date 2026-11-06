@@ -14,14 +14,14 @@ La aplicación es una ventana de escritorio para Windows hecha con .NET 10: la i
 - **Pestañas de consulta**:
   - **SQL**: editor con autocompletado de tablas y columnas, historial y Ctrl+Enter para ejecutar.
   - **EF Script**: script C# sobre EF Core, con autocompletado de Roslyn, y «Ver SQL» para ver el SQL que generaría sin ejecutarlo.
-  - **Editor visual**: diagrama de tablas (arrastrar desde el explorador), uniones por columnas, `Select`, `Where`, `GroupBy`, `DistinctBy`, agregaciones y `Skip`/`Take`/`Limit`. Genera SQL o EF Script y permite ejecutar la consulta.
+  - **Editor visual**: diagrama de tablas (arrastrar desde el explorador), uniones por columnas, `Select`, `Where`, `GroupBy`, `DistinctBy`, `OrderBy` (ASC/DESC, también sobre agregaciones), agregaciones y `Skip`/`Take`/`Limit`. Genera SQL o EF Script y permite ejecutar la consulta.
 - **Resultados**: tabla paginada con el tiempo de ejecución al pie. Se puede cambiar la altura del panel de resultados arrastrando la barra que lo separa del editor o del diagrama.
 
 **Solo lectura:** las consultas y los scripts se ejecutan dentro de una transacción que siempre se deshace, y `SaveChanges` está bloqueado en el contexto de EF. Las consultas SQL que parecen modificar datos piden confirmación antes de ejecutarse.
 
 ## Capturas
 
-Editor visual sobre la base de datos de ejemplo «Tienda» (Oracle 11g): tablas unidas por sus claves, columnas seleccionadas, una agregación (`SUM` de cantidades por pedido) y el resultado debajo.
+Editor visual sobre la base de datos de ejemplo «Tienda» (Oracle 11g): tablas unidas por sus claves, columnas en `Select` y `GroupBy`, una agregación (`SUM` de cantidades por cliente), orden por la cantidad descendente y el resultado debajo. Las secciones plegadas muestran solo lo que tienen activado.
 
 <p align="center">
   <img src="docs/assets/editor-visual.png" alt="Editor visual de LinqRover con la tienda de ejemplo" width="100%">

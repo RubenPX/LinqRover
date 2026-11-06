@@ -123,6 +123,18 @@ public static class QueryDesignLinq
             sb.Append("\n    .Select(g => g.First())");
         }
 
+        // OrderBy por alias de salida: OrderBy/OrderByDescending para el primero, ThenBy/ThenByDescending para el resto.
+        if (design.OrderBy is { Count: > 0 } order)
+        {
+            for (var i = 0; i < order.Count; i++)
+            {
+                var member = ClassGenerator.Identifier(
+                    outputs.First(o => string.Equals(o.Alias, order[i].Alias, StringComparison.OrdinalIgnoreCase)).Alias);
+                var method = (i == 0 ? "OrderBy" : "ThenBy") + (order[i].Descending ? "Descending" : "");
+                sb.Append($"\n    .{method}(x => x.{member})");
+            }
+        }
+
         if (design.Skip is { } skip)
             sb.Append($"\n    .Skip({skip})");
 

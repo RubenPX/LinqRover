@@ -37,7 +37,12 @@ public sealed record QueryDesign(
     int? Take = null,
     int? Limit = null,
     /// <summary>Columnas de Select que identifican una fila: de cada combinación de estos valores se queda una sola.</summary>
-    IReadOnlyList<ColumnRef>? DistinctBy = null);
+    IReadOnlyList<ColumnRef>? DistinctBy = null,
+    /// <summary>Orden del resultado, por alias de salida (columna o agregación), en el orden de la lista.</summary>
+    IReadOnlyList<OrderItem>? OrderBy = null);
+
+/// <summary>Un criterio de OrderBy: alias de una columna de salida o agregación, ascendente o descendente.</summary>
+public sealed record OrderItem(string Alias, bool Descending = false);
 
 /// <summary>Tabla que se añade a la consulta y sus condiciones. En cada condición, Left ya está colocada y Right es la tabla del paso.</summary>
 public sealed record JoinStep(string SourceId, IReadOnlyList<QueryJoin> Conditions);
@@ -152,7 +157,12 @@ public static class QueryDesignPlan
 
         // Comprueban la unión y los alias de salida.
         PlanJoins(design);
-        Outputs(engine, design);
+        var outputs = Outputs(engine, design);
+
+        foreach (var order in design.OrderBy ?? Array.Empty<OrderItem>())
+            if (!outputs.Any(o => string.Equals(o.Alias, order.Alias, StringComparison.OrdinalIgnoreCase)))
+                throw new QueryDesignException(
+                    $"No se puede ordenar por «{order.Alias}»: no es una columna ni una agregación del resultado.");
     }
 
     /// <summary>
