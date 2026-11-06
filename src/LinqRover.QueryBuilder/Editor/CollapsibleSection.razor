@@ -1,0 +1,31 @@
+<div class="flex flex-col gap-2">
+    <div class="flex items-center gap-2">
+        <button type="button" class="flex-1 min-w-0 flex items-center gap-1 text-left font-semibold"
+                aria-expanded="@_expanded" @onclick="() => _expanded = !_expanded">
+            <span class="w-3 text-xs opacity-60">@(_expanded ? "▾" : "▸")</span>
+            <span class="truncate">@Title</span>
+        </button>
+        @Actions
+    </div>
+
+    @if (_expanded)
+    {
+        <div class="flex flex-col gap-2">
+            @ChildContent
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Título de la sección.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>true si la sección empieza abierta.</summary>
+    [Parameter] public bool DefaultExpanded { get; set; }
+    /// <summary>Botones junto al título (p. ej. «+ Condición»).</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _expanded;
+
+    protected override void OnInitialized() => _expanded = DefaultExpanded;
+}

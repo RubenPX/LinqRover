@@ -28,7 +28,7 @@
                         <button class="btn btn-ghost btn-sm" aria-label="Ocultar tablas" title="Ocultar tablas" @onclick="() => _sidebarCollapsed = true">«</button>
                     </div>
                     <div class="flex-1 min-h-0 overflow-y-auto">
-                        <TablesPanel Tables="@_tables" SelectedTable="@_selected" OnSelect="OpenTableAsync" />
+                        <TablesPanel Tables="@_tables" SelectedTable="@_selected" OnSelect="OpenTableAsync" LoadColumns="LoadColumnsAsync" />
                     </div>
                 </div>
             </aside>
@@ -95,7 +95,27 @@
                 <div class="absolute inset-0 @(doc.Id == _activeDoc ? "" : "hidden")">
                     @if (doc.IsVisual)
                     {
-                        <QueryDiagramEditor @key="doc.Id" Tables="@_tables" Schema="@_schema" LoadColumns="LoadColumnsAsync" />
+                        <QueryDiagramEditor @key="doc.Id" Schema="@_schema" LoadColumns="LoadColumnsAsync"
+                                            Engine="@_profile.Engine" Busy="@doc.Busy" OnExecute="sql => RunVisualAsync(doc, sql)"
+                                            ShowResult="@(doc.Error is not null || doc.Status is not null)">
+                            <ResultContent>
+                                @if (doc.Error is not null)
+                                {
+                                    <div role="alert" class="alert alert-error alert-soft text-sm py-2 font-mono-sql whitespace-pre-wrap">@doc.Error</div>
+                                }
+                                else if (doc.Status is not null)
+                                {
+                                    <p class="text-sm opacity-70">@doc.Status</p>
+                                }
+
+                                @if (doc.Result is { Columns.Count: > 0 })
+                                {
+                                    <div class="flex-1 min-h-0 flex flex-col">
+                                        <DataViewer @key="doc.ResultKey" LoadPage="(page, size) => LoadDocPageAsync(doc, page, size)" PageSize="30" />
+                                    </div>
+                                }
+                            </ResultContent>
+                        </QueryDiagramEditor>
                     }
                     else
                     {
@@ -160,7 +180,17 @@
         public string Title { get; init; } = "";
         /// <summary>Texto inicial del editor.</summary>
         public string Text { get; init; } = "";
+
+        // Estado de la pestaña visual: ejecución y resultado.
+        public bool Busy { get; set; }
+        public string? Status { get; set; }
+        public string? Error { get; set; }
+        public QueryResult? Result { get; set; }
+        public string ResultKey { get; set; } = "";
     }
+
+    /// <summary>Filas máximas que trae la consulta del editor visual (igual que las pestañas SQL).</summary>
+    private const int VisualMaxRows = 1000;
 
     private string DataKey => $"{_schema}.{_selected}";
 
@@ -312,6 +342,43 @@
 
     private Task<IReadOnlyList<ColumnInfo>> LoadColumnsAsync(string table) =>
         Providers.Get(_profile!.Engine).GetColumnsAsync(_profile!, _schema, table);
+
+    /// <summary>Ejecuta el SQL generado por el editor visual, dentro de una transacción que se deshace.</summary>
+    private async Task RunVisualAsync(QueryDocument doc, string sql)
+    {
+        doc.Busy = true;
+        doc.Error = null;
+        doc.Status = null;
+        StateHasChanged();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            var result = await Providers.Get(_profile!.Engine).ExecuteReadOnlyAsync(_profile!, sql, VisualMaxRows, cts.Token);
+
+            doc.Result = result;
+            doc.ResultKey = Guid.NewGuid().ToString();
+            var ms = result.Elapsed.TotalMilliseconds.ToString("0");
+            doc.Status = result.Columns.Count == 0
+                ? $"Sentencia ejecutada · {result.RowsAffected ?? 0} filas afectadas · {ms} ms (revertido)"
+                : $"{result.Rows.Count} filas{(result.Truncated ? $" (se muestran las primeras {VisualMaxRows})" : "")} · {ms} ms";
+        }
+        catch (Exception ex)
+        {
+            doc.Result = null;
+            doc.Error = ex.Message;
+        }
+        finally
+        {
+            doc.Busy = false;
+        }
+    }
+
+    private static Task<PageResult> LoadDocPageAsync(QueryDocument doc, int pageIndex, int pageSize)
+    {
+        var r = doc.Result!;
+        var rows = r.Rows.Skip(pageIndex * pageSize).Take(pageSize).ToList();
+        return Task.FromResult(new PageResult(r.Columns, rows, r.Rows.Count, pageIndex, pageSize));
+    }
 
     private void AddDoc(bool isSql)
     {

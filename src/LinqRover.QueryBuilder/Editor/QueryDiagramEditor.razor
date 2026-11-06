@@ -1,53 +1,70 @@
 <div class="h-full min-h-0 flex flex-col gap-2">
     <div class="flex flex-wrap items-center gap-2">
-        <select class="select select-sm w-56" @bind="_tableToAdd">
-            <option value="">Elige una tabla…</option>
-            @foreach (var table in Tables)
-            {
-                <option value="@table">@table</option>
-            }
-        </select>
-        <button class="btn btn-sm" disabled="@string.IsNullOrEmpty(_tableToAdd)" @onclick="AddTableAsync">Añadir tabla</button>
-        <button class="btn btn-ghost btn-sm" @onclick="DeleteSelected">Eliminar selección</button>
-        <span class="text-xs opacity-60">Arrastra una tabla desde la lista o desde el selector; arrastra de una columna a otra para relacionarlas.</span>
         @if (_error is not null)
         {
             <span class="text-xs text-error">@_error</span>
         }
     </div>
 
-    <div @ref="_zone" class="flex-1 min-h-0 border border-base-300 rounded-box overflow-hidden relative">
-        <CascadingValue Value="_diagram">
-            <DiagramCanvas Class="h-full w-full" />
-        </CascadingValue>
-    </div>
+    <div class="flex-1 min-h-0 flex gap-3">
+        <div class="flex-1 min-w-0 min-h-0 flex flex-col gap-2">
+            <div @ref="_zone" class="flex-1 min-h-0 border border-base-300 rounded-box overflow-hidden relative">
+                <CascadingValue Value="_diagram">
+                    <DiagramCanvas Class="h-full w-full" />
+                </CascadingValue>
+            </div>
 
-    <div class="max-h-28 overflow-y-auto text-xs font-mono-sql">
-        @if (!Joins.Any())
-        {
-            <span class="opacity-60">Sin relaciones.</span>
-        }
-        @foreach (var join in Joins)
-        {
-            <div>@join</div>
-        }
+            <div class="max-h-28 overflow-y-auto text-xs font-mono-sql">
+                @if (!JoinLabels.Any())
+                {
+                    <span class="opacity-60">Sin relaciones.</span>
+                }
+                @foreach (var label in JoinLabels)
+                {
+                    <div>@label</div>
+                }
+            </div>
+
+            @* Resultados de la última ejecución, debajo del diagrama. Sin contenido no ocupa alto. *@
+            @if (ShowResult && ResultContent is not null)
+            {
+                <div class="shrink-0 h-72 min-h-0 flex flex-col">
+                    @ResultContent
+                </div>
+            }
+        </div>
+
+        @* Panel de consulta: ocupa todo el alto de la zona y hace scroll por dentro. *@
+        <aside class="w-80 shrink-0 h-full min-h-0 overflow-y-auto card bg-base-100 border border-base-300">
+            <div class="card-body p-3">
+                <QueryDesignPanel Sources="@QuerySources" Joins="@QueryJoins" Engine="Engine"
+                                  OnExecute="OnExecute" Busy="Busy" />
+            </div>
+        </aside>
     </div>
 </div>
 
 @code {
-    /// <summary>Tablas que se pueden añadir al lienzo.</summary>
-    [Parameter] public IReadOnlyList<string> Tables { get; set; } = [];
     /// <summary>Esquema de las tablas.</summary>
     [Parameter, EditorRequired] public string Schema { get; set; } = "";
+    /// <summary>Motor de la conexión: decide el SQL y los literales que genera el formulario.</summary>
+    [Parameter, EditorRequired] public DatabaseEngine Engine { get; set; }
     /// <summary>Carga las columnas de una tabla del esquema.</summary>
     [Parameter, EditorRequired] public Func<string, Task<IReadOnlyList<ColumnInfo>>> LoadColumns { get; set; } = default!;
+    /// <summary>Recibe el SQL que se quiere ejecutar desde el formulario.</summary>
+    [Parameter] public EventCallback<string> OnExecute { get; set; }
+    /// <summary>true mientras se ejecuta la consulta.</summary>
+    [Parameter] public bool Busy { get; set; }
+    /// <summary>Resultado de la última ejecución, que se muestra debajo del diagrama.</summary>
+    [Parameter] public RenderFragment? ResultContent { get; set; }
+    /// <summary>true si hay algo que mostrar (estado, error o resultados). Sin contenido, el bloque no ocupa alto.</summary>
+    [Parameter] public bool ShowResult { get; set; }
 
     [Inject] private IJSRuntime JS { get; set; } = default!;
 
     private BlazorDiagram _diagram = default!;
     private ElementReference _zone;
     private DotNetObjectReference<QueryDiagramEditor>? _dotNet;
-    private string _tableToAdd = "";
     private string? _error;
 
     protected override void OnInitialized()
@@ -77,13 +94,6 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private async Task AddTableAsync()
-    {
-        if (string.IsNullOrEmpty(_tableToAdd)) return;
-        var index = _diagram.Nodes.Count();
-        await AddTableAtAsync(_tableToAdd, new Point(40 + (index % 3) * 280, 40 + (index / 3) * 320));
-    }
-
     /// <summary>Llamado desde js/drag-drop.js al soltar una tabla sobre la zona del editor.</summary>
     [JSInvokable]
     public async Task OnTableDropped(string table, double clientX, double clientY)
@@ -108,40 +118,28 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private void DeleteSelected()
-    {
-        foreach (var model in _diagram.GetSelectedModels().ToList())
-        {
-            if (model is TableNodeModel node)
-            {
-                // Antes de quitar el nodo, se quitan los enlaces que llegan a sus puertos.
-                foreach (var link in _diagram.Links.Where(l => IsAttachedTo(l, node)).ToList())
-                    _diagram.Links.Remove(link);
-                _diagram.Nodes.Remove(node);
-            }
-            else if (model is BaseLinkModel link)
-            {
-                _diagram.Links.Remove(link);
-            }
-        }
-    }
+    /// <summary>Tablas del diagrama, en el orden en que se añadieron. La primera es la base de la consulta.</summary>
+    private IReadOnlyList<QuerySource> QuerySources =>
+        _diagram.Nodes.OfType<TableNodeModel>()
+            .Select(n => new QuerySource(n.Id, n.Schema, n.Table, n.Columns))
+            .ToList();
 
-    private static bool IsAttachedTo(BaseLinkModel link, NodeModel node) =>
-        (link.Source?.Model as PortModel)?.Parent == node || (link.Target?.Model as PortModel)?.Parent == node;
+    /// <summary>Enlaces entre columnas del diagrama. Cada uno es un INNER JOIN.</summary>
+    private IReadOnlyList<QueryJoin> QueryJoins =>
+        _diagram.Links
+            .Select(l => (Source: l.Source?.Model as ColumnPort, Target: l.Target?.Model as ColumnPort))
+            .Where(p => p.Source is not null && p.Target is not null)
+            .Select(p => new QueryJoin(RefOf(p.Source!), RefOf(p.Target!)))
+            .ToList();
 
     /// <summary>Condiciones de unión de los enlaces entre columnas, tipo «TABLA.COL = OTRA.COL».</summary>
-    private IEnumerable<string> Joins =>
-        _diagram.Links
-            .Where(l => l.Source?.Model is ColumnPort && l.Target?.Model is ColumnPort)
-            .Select(l =>
-            {
-                var source = (ColumnPort)l.Source!.Model;
-                var target = (ColumnPort)l.Target!.Model;
-                return $"{TableOf(source)}.{source.Column} = {TableOf(target)}.{target.Column}";
-            });
+    private IEnumerable<string> JoinLabels =>
+        QueryJoins.Select(j => $"{TableOf(j.Left)}.{j.Left.Column} = {TableOf(j.Right)}.{j.Right.Column}");
 
-    private static string TableOf(ColumnPort port) =>
-        (port.Parent as TableNodeModel)?.Table ?? "?";
+    private static ColumnRef RefOf(ColumnPort port) => new(port.Parent?.Id ?? "", port.Column);
+
+    private string TableOf(ColumnRef reference) =>
+        QuerySources.FirstOrDefault(s => s.Id == reference.SourceId)?.Table ?? "?";
 
     public async ValueTask DisposeAsync()
     {
