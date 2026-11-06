@@ -6,8 +6,8 @@
 @using LinqRover.QueryBuilder.Editor
 
 <div class="flex flex-1 min-h-0 min-w-0">
-    @* Explorador lateral: tablas de la conexión, colapsable *@
-    @if (_profile is not null)
+    @* Explorador lateral: tablas de la conexión, colapsable (no se muestra mientras carga) *@
+    @if (_profile is not null && !_loading)
     {
         @if (_sidebarCollapsed)
         {
@@ -37,7 +37,7 @@
                     <span class="truncate">@_profile.Name</span>
                 </div>
                 <div class="px-2 py-2">
-                    <select class="select select-sm w-full" aria-label="Esquema" @onchange="OnSchemaChanged">
+                    <select class="select select-sm w-full" aria-label="Esquema" @onchange="OnSchemaChanged" @onfocus="EnsureSchemaListAsync">
                         @foreach (var schema in _schemas)
                         {
                             <option value="@schema" selected="@(schema == _schema)">@schema</option>
@@ -63,15 +63,19 @@
             </div>
         }
 
-        @if (_profile is null && _error is null)
+        @if (_loading)
         {
-            <div class="flex-1 flex items-center justify-center">
-                <span class="loading loading-spinner"></span>
+            <div class="flex-1 flex flex-col items-center justify-center gap-2 text-sm">
+                <div class="flex items-center gap-2 opacity-80">
+                    <span class="loading loading-spinner"></span>
+                    <span>@_loadStage</span>
+                </div>
+                <span class="text-xs opacity-50">@LoadElapsed()</span>
             </div>
         }
         else if (_profile is not null)
         {
-            @* Pestañas del editor *@
+            @* Pestañas del editor (solo cuando la carga inicial ha terminado) *@
             <div class="vs-tabs" role="tablist" aria-label="Pestañas de consulta">
                 @foreach (var doc in _docs)
                 {
@@ -249,9 +253,40 @@
         await Retry();
     }
 
+    // Estado de la carga inicial: etapa actual y reloj para distinguir una operación lenta de una colgada.
+    // Mientras es true se muestra solo el spinner: _profile se asigna pronto y no basta para saber si ya hay datos.
+    private bool _loading;
+    private string _loadStage = "Leyendo la conexión…";
+    private DateTime _loadStarted;
+    private System.Threading.Timer? _loadTicker;
+
+    private bool _schemaListLoaded;
+
+    /// <summary>Lee la lista completa de esquemas la primera vez que se despliega el selector.</summary>
+    private async Task EnsureSchemaListAsync()
+    {
+        if (_schemaListLoaded || _profile is null) return;
+        _schemaListLoaded = true;
+        try
+        {
+            var all = (await Providers.Get(_profile.Engine).GetSchemasAsync(_profile)).ToList();
+            if (!all.Contains(_schema)) all.Insert(0, _schema);
+            _schemas = all;
+        }
+        catch (Exception ex)
+        {
+            _schemaListLoaded = false;
+            _error = $"No se pudo leer la lista de esquemas: {ex.Message}";
+        }
+    }
+
     private async Task Retry()
     {
         _error = null;
+        _loading = true;
+        _loadStarted = DateTime.UtcNow;
+        _loadStage = "Leyendo la conexión…";
+        StartLoadTicker();
         try
         {
             _profile = (await Store.GetAllAsync()).FirstOrDefault(p => p.Id == ProfileId);
@@ -261,13 +296,13 @@
                 return;
             }
 
+            // Solo se carga el esquema del perfil (o el por defecto del motor). La lista completa de esquemas
+            // no se pide al conectar: se lee al desplegar el selector (EnsureSchemaListAsync).
             var provider = Providers.Get(_profile.Engine);
-            _schemas = (await provider.GetSchemasAsync(_profile)).ToList();
-            // El esquema elegido en el perfil tiene prioridad; si ya no existe, el del proveedor.
-            var preferred = _profile.DefaultSchema ?? provider.GetDefaultSchema(_profile);
-            _schema = _schemas.Contains(preferred)
-                ? preferred
-                : _schemas.FirstOrDefault() ?? provider.GetDefaultSchema(_profile);
+            _schema = _profile.DefaultSchema ?? provider.GetDefaultSchema(_profile);
+            _schemas = [_schema];
+            _schemaListLoaded = false;
+            SetStage($"Leyendo tablas de {_schema}…");
             await LoadTablesAsync();
             Workbench.OpenWorkspace(_profile.Id, _profile.Name, _profile.Engine.DisplayName(), _schema);
         }
@@ -275,6 +310,38 @@
         {
             _error = $"No se pudo conectar: {ex.Message}";
         }
+        finally
+        {
+            _loading = false;
+            StopLoadTicker();
+        }
+    }
+
+    private void SetStage(string stage)
+    {
+        _loadStage = stage;
+        StateHasChanged();
+    }
+
+    /// <summary>Refresca el reloj de la pantalla de carga cada segundo mientras se espera a la base de datos.</summary>
+    private void StartLoadTicker()
+    {
+        StopLoadTicker();
+        _loadTicker = new System.Threading.Timer(_ => _ = InvokeAsync(StateHasChanged), null, 1000, 1000);
+    }
+
+    private void StopLoadTicker()
+    {
+        _loadTicker?.Dispose();
+        _loadTicker = null;
+    }
+
+    private string LoadElapsed()
+    {
+        var seconds = (int)(DateTime.UtcNow - _loadStarted).TotalSeconds;
+        return seconds >= 10
+            ? $"{seconds} s · la base de datos tarda en responder"
+            : $"{seconds} s";
     }
 
     private async Task OnSchemaChanged(ChangeEventArgs e)
@@ -433,5 +500,9 @@
             _activeDoc = _docs.Count == 0 ? null : _docs[Math.Min(index, _docs.Count - 1)].Id;
     }
 
-    public void Dispose() => Workbench.CloseWorkspace();
+    public void Dispose()
+    {
+        StopLoadTicker();
+        Workbench.CloseWorkspace();
+    }
 }
