@@ -8,19 +8,37 @@
         <div class="text-xs opacity-60">Tabla base: <span class="font-mono-sql">@Sources[0].Table</span></div>
 
         <CollapsibleSection Title="Select" DefaultExpanded="true">
-            @foreach (var source in Sources)
-            {
-                <div class="text-xs font-mono-sql opacity-60">@source.Table</div>
-                @foreach (var column in source.Columns)
+            @* Desplegable: el botón muestra cuántas columnas hay elegidas; al abrirlo, una casilla por columna. *@
+            <div class="flex flex-col gap-2">
+                <button type="button" class="btn btn-sm vs-select-trigger" aria-haspopup="listbox" aria-expanded="@_selectOpen"
+                        @onclick="() => _selectOpen = !_selectOpen">
+                    <span class="truncate">@SelectSummary</span>
+                    <span class="opacity-60" aria-hidden="true">@(_selectOpen ? "▴" : "▾")</span>
+                </button>
+
+                @if (_selectOpen)
                 {
-                    var reference = new ColumnRef(source.Id, column.Name);
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" class="checkbox checkbox-xs" checked="@_select.Contains(reference)"
-                               @onchange="e => SetSelected(reference, e.Value is true)" />
-                        <span class="font-mono-sql text-xs">@column.Name</span>
-                    </label>
+                    <div class="vs-popup p-2 flex flex-col gap-1 max-h-72 overflow-y-auto" role="listbox" aria-multiselectable="true">
+                        <div class="flex items-center justify-between pb-1 border-b border-base-300">
+                            <button type="button" class="btn btn-ghost btn-xs" @onclick="SelectAll">Todas</button>
+                            <button type="button" class="btn btn-ghost btn-xs" @onclick="SelectNone">Ninguna</button>
+                        </div>
+                        @foreach (var source in Sources)
+                        {
+                            <div class="text-xs font-mono-sql opacity-60 pt-1">@source.Table</div>
+                            @foreach (var column in source.Columns)
+                            {
+                                var reference = new ColumnRef(source.Id, column.Name);
+                                <label class="flex items-center gap-2 cursor-pointer px-1 py-0.5 rounded-sm hover:bg-base-300">
+                                    <input type="checkbox" class="checkbox checkbox-xs" checked="@_select.Contains(reference)"
+                                           @onchange="e => SetSelected(reference, e.Value is true)" />
+                                    <span class="font-mono-sql text-xs">@column.Name</span>
+                                </label>
+                            }
+                        }
+                    </div>
                 }
-            }
+            </div>
 
             @if (_select.Count > 0)
             {
@@ -102,6 +120,25 @@
             }
         </CollapsibleSection>
 
+        <CollapsibleSection Title="DistinctBy">
+            @if (_select.Count == 0)
+            {
+                <p class="text-xs opacity-60">Marca primero columnas en Select.</p>
+            }
+            else
+            {
+                <p class="text-xs opacity-60">Una fila por cada combinación de estas columnas (se queda la primera que aparezca).</p>
+                @foreach (var reference in _select)
+                {
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="checkbox checkbox-xs" checked="@_distinctBy.Contains(reference)"
+                               @onchange="e => Toggle(_distinctBy, reference, e.Value is true)" />
+                        <span class="font-mono-sql text-xs">@SourceName(reference).@reference.Column</span>
+                    </label>
+                }
+            }
+        </CollapsibleSection>
+
         <CollapsibleSection Title="Agregaciones">
             <Actions>
                 <button class="btn btn-ghost btn-xs" @onclick="() => _aggs.Add(new AggRow())">+ Agregación</button>
@@ -162,12 +199,12 @@
     @if (_output is not null)
     {
         <div class="modal modal-open" role="dialog" aria-modal="true">
-            <div class="modal-box w-auto min-w-fit max-w-[90vw] flex flex-col gap-3">
+            <div class="modal-box w-[min(90vw,56rem)] max-w-[90vw] flex flex-col gap-3">
                 <div class="flex items-center justify-between gap-6">
                     <h3 class="font-bold">@(_outputIsSql ? "SQL generado" : "EF Script generado")</h3>
                     <button class="btn btn-ghost btn-sm" aria-label="Cerrar" @onclick="CloseOutput">✕</button>
                 </div>
-                <pre class="overflow-auto max-h-[70vh] text-xs font-mono-sql whitespace-pre">@_output</pre>
+                <pre class="min-w-0 w-full overflow-auto max-h-[70vh] text-xs font-mono-sql whitespace-pre">@_output</pre>
                 <div class="modal-action mt-0">
                     <button class="btn btn-sm" @onclick="CloseOutput">Cerrar</button>
                 </div>
@@ -190,6 +227,7 @@
     // Lista ordenada: el orden es el de las columnas en el SELECT y en el EF.
     private readonly List<ColumnRef> _select = [];
     private readonly HashSet<ColumnRef> _groupBy = [];
+    private readonly HashSet<ColumnRef> _distinctBy = [];
     private readonly List<WhereRow> _where = [];
     private readonly List<AggRow> _aggs = [];
     private string _skip = "";
@@ -262,8 +300,27 @@
             aggregates,
             ParseInt(_skip, "Skip"),
             ParseInt(_take, "Take"),
-            ParseInt(_limit, "Limit"));
+            ParseInt(_limit, "Limit"),
+            _select.Where(_distinctBy.Contains).ToList());
     }
+
+    private bool _selectOpen;
+
+    private string SelectSummary => _select.Count switch
+    {
+        0 => "Elegir columnas…",
+        1 => "1 columna seleccionada",
+        _ => $"{_select.Count} columnas seleccionadas",
+    };
+
+    private void SelectAll()
+    {
+        foreach (var source in Sources)
+            foreach (var column in source.Columns)
+                SetSelected(new ColumnRef(source.Id, column.Name), true);
+    }
+
+    private void SelectNone() => _select.Clear();
 
     private void SetSelected(ColumnRef reference, bool on)
     {

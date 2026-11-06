@@ -19,7 +19,7 @@ window.lrDrag = (function () {
         if (highlighted === zone) return;
         if (highlighted) highlighted.style.outline = "";
         highlighted = zone;
-        if (highlighted) highlighted.style.outline = "2px dashed #3b82f6";
+        if (highlighted) highlighted.style.outline = "2px dashed #0078d4";
     }
 
     function moveGhost(x, y) {
@@ -40,7 +40,7 @@ window.lrDrag = (function () {
             ghost = document.createElement("div");
             ghost.textContent = pending.table;
             ghost.style.cssText = "position:fixed;left:0;top:0;z-index:9999;pointer-events:none;" +
-                "padding:4px 8px;border-radius:6px;background:#1f2937;color:#fff;font:12px monospace;opacity:.9;";
+                "padding:2px 8px;border-radius:4px;background:#202020;color:#cccccc;border:1px solid #454545;font:12px Consolas,monospace;opacity:.95;";
             document.body.appendChild(ghost);
         }
         moveGhost(e.clientX, e.clientY);

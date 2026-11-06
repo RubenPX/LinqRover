@@ -1,9 +1,9 @@
-<div class="flex items-start justify-between gap-4 mb-6">
-    <div>
-        <h1 class="text-2xl font-bold">@Title</h1>
+<div class="vs-page-header">
+    <div class="min-w-0">
+        <h1 class="vs-title">@Title</h1>
         @if (!string.IsNullOrEmpty(Subtitle))
         {
-            <p class="text-sm opacity-60 mt-1">@Subtitle</p>
+            <p class="text-sm vs-muted mt-1">@Subtitle</p>
         }
     </div>
     @ChildContent

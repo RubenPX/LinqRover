@@ -1,131 +1,160 @@
 @page "/workspace/{ProfileId:guid}"
+@implements IDisposable
 @inject ProfileStore Store
 @inject DatabaseProviders Providers
+@inject WorkbenchState Workbench
 @using LinqRover.QueryBuilder.Editor
 
-<div class="flex h-full gap-3 -m-4 p-4 min-h-0">
-    @* Barra lateral de tablas: colapsable *@
+<div class="flex flex-1 min-h-0 min-w-0">
+    @* Explorador lateral: tablas de la conexión, colapsable *@
     @if (_profile is not null)
     {
         @if (_sidebarCollapsed)
         {
-            <div class="w-10 shrink-0 flex flex-col items-center py-2 card bg-base-100 border border-base-300">
-                <button class="btn btn-ghost btn-sm" aria-label="Mostrar tablas" title="Mostrar tablas" @onclick="() => _sidebarCollapsed = false">»</button>
+            <div class="vs-activitybar">
+                <button class="vs-activity-item" aria-label="Mostrar tablas" title="Mostrar tablas" @onclick="() => _sidebarCollapsed = false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M20 7h-3a2 2 0 0 1-2-2V2" />
+                        <path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z" />
+                        <path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8" />
+                    </svg>
+                </button>
             </div>
         }
         else
         {
-            <aside class="w-64 shrink-0 min-h-0 flex flex-col card bg-base-100 border border-base-300">
-                <div class="card-body p-3 min-h-0 flex flex-col gap-2">
-                    <span class="badge badge-ghost self-start">@_profile.Name · @_profile.Engine.DisplayName()</span>
-                    <div class="flex items-center gap-2">
-                        <select class="select select-sm flex-1 min-w-0" @onchange="OnSchemaChanged">
-                            @foreach (var schema in _schemas)
-                            {
-                                <option value="@schema" selected="@(schema == _schema)">@schema</option>
-                            }
-                        </select>
-                        <button class="btn btn-ghost btn-sm" aria-label="Ocultar tablas" title="Ocultar tablas" @onclick="() => _sidebarCollapsed = true">«</button>
-                    </div>
-                    <div class="flex-1 min-h-0 overflow-y-auto">
-                        <TablesPanel Tables="@_tables" SelectedTable="@_selected" OnSelect="OpenTableAsync" LoadColumns="LoadColumnsAsync" />
-                    </div>
+            <aside class="vs-sidebar">
+                <div class="vs-sidebar-header">
+                    <span class="truncate">Explorador</span>
+                    <button class="vs-icon-btn" aria-label="Ocultar tablas" title="Ocultar tablas" @onclick="() => _sidebarCollapsed = true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M15 18l-6-6 6-6" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="vs-section-header" title="@_profile.Name · @_profile.Engine.DisplayName()">
+                    <span class="truncate">@_profile.Name</span>
+                </div>
+                <div class="px-2 py-2">
+                    <select class="select select-sm w-full" aria-label="Esquema" @onchange="OnSchemaChanged">
+                        @foreach (var schema in _schemas)
+                        {
+                            <option value="@schema" selected="@(schema == _schema)">@schema</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="vs-section-header"><span>Tablas</span></div>
+                <div class="flex-1 min-h-0 px-2 pt-2 pb-2 flex flex-col">
+                    <TablesPanel Tables="@_tables" SelectedTable="@_selected" OnSelect="OpenTableAsync" LoadColumns="LoadColumnsAsync" />
                 </div>
             </aside>
         }
     }
 
-    <div class="flex-1 min-w-0 flex flex-col gap-3 min-h-0">
-    @if (_error is not null)
-    {
-        <div role="alert" class="alert alert-error">
-            <span>@_error</span>
-            <button class="btn btn-sm" @onclick="Retry">Reintentar</button>
-        </div>
-    }
+    @* Área del editor: pestañas de consulta y contenido *@
+    <div class="vs-editor-area">
+        @if (_error is not null)
+        {
+            <div role="alert" class="alert alert-error alert-soft rounded-none flex items-center gap-3 px-3 py-1.5 shrink-0">
+                <span class="text-sm">@_error</span>
+                <button class="btn btn-sm" @onclick="Retry">Reintentar</button>
+            </div>
+        }
 
-    @if (_profile is null && _error is null)
-    {
-        <span class="loading loading-spinner"></span>
-    }
-    else if (_profile is not null)
-    {
+        @if (_profile is null && _error is null)
+        {
+            <div class="flex-1 flex items-center justify-center">
+                <span class="loading loading-spinner"></span>
+            </div>
+        }
+        else if (_profile is not null)
+        {
+            @* Pestañas del editor *@
+            <div class="vs-tabs" role="tablist" aria-label="Pestañas de consulta">
+                @foreach (var doc in _docs)
+                {
+                    <div role="tab" aria-selected="@(doc.Id == _activeDoc)" class="vs-tab @(doc.Id == _activeDoc ? "is-active" : "")"
+                         @onclick="() => _activeDoc = doc.Id">
+                        <span class="text-[13px] truncate max-w-48">@doc.Title</span>
+                        <button class="vs-tab-close" aria-label="Cerrar pestaña" title="Cerrar"
+                                @onclick="() => CloseDoc(doc)" @onclick:stopPropagation="true">
+                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                <path d="M8 8.7l3.6 3.6.7-.7L8.7 8l3.6-3.6-.7-.7L8 7.3 4.4 3.7l-.7.7L7.3 8l-3.6 3.6.7.7L8 8.7z" />
+                            </svg>
+                        </button>
+                    </div>
+                }
 
-        @* Barra de pestañas de consultas *@
-        <div class="flex items-center gap-1 border-b border-base-300 overflow-x-auto">
-            @foreach (var doc in _docs)
+                <button class="vs-tab-action" aria-label="Nueva pestaña" title="Nueva pestaña"
+                        @onclick="() => _showNewMenu = !_showNewMenu">
+                    <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+                        <path d="M14 7v1H8v6H7V8H1V7h6V1h1v6h6z" />
+                    </svg>
+                </button>
+            </div>
+
+            @if (_showNewMenu)
             {
-                <div class="tab-group flex items-center rounded-t-box border border-b-0 border-base-300 px-2 py-1 text-sm cursor-pointer
-                            @(doc.Id == _activeDoc ? "bg-base-100 font-semibold" : "bg-base-200 opacity-80")"
-                     @onclick="() => _activeDoc = doc.Id">
-                    <span class="font-mono-sql">@doc.Title</span>
-                    <button class="btn btn-ghost btn-xs ml-1" aria-label="Cerrar pestaña"
-                            @onclick="() => CloseDoc(doc)" @onclick:stopPropagation="true">✕</button>
-                </div>
+                <ul class="menu vs-popup vs-tab-menu" role="menu">
+                    <li><button role="menuitem" @onclick="() => AddDoc(isSql: true)">SQL</button></li>
+                    <li><button role="menuitem" @onclick="() => AddDoc(isSql: false)">EF Script</button></li>
+                    <li><button role="menuitem" @onclick="AddVisualDoc">Editor visual</button></li>
+                </ul>
             }
 
-            <div class="dropdown">
-                <button tabindex="0" class="btn btn-ghost btn-sm" aria-label="Nueva pestaña" @onclick="() => _showNewMenu = !_showNewMenu">+</button>
-                @if (_showNewMenu)
+            <div class="flex-1 min-h-0 relative p-2">
+                @if (_docs.Count == 0)
                 {
-                    <ul class="dropdown-content menu bg-base-100 rounded-box z-20 w-44 shadow p-2 mt-1">
-                        <li><button @onclick="() => AddDoc(isSql: true)">SQL</button></li>
-                        <li><button @onclick="() => AddDoc(isSql: false)">EF Script</button></li>
-                        <li><button @onclick="AddVisualDoc">Editor visual</button></li>
-                    </ul>
+                    <div class="h-full flex flex-col items-center justify-center gap-3 vs-muted">
+                        <p class="text-sm">No hay pestañas abiertas.</p>
+                        <div class="flex flex-wrap justify-center gap-2">
+                            <button class="btn btn-sm" @onclick="() => AddDoc(isSql: true)">Nueva pestaña SQL</button>
+                            <button class="btn btn-sm" @onclick="() => AddDoc(isSql: false)">Nueva pestaña EF Script</button>
+                            <button class="btn btn-sm" @onclick="AddVisualDoc">Nueva pestaña editor visual</button>
+                        </div>
+                    </div>
+                }
+
+                @foreach (var doc in _docs)
+                {
+                    <div class="absolute inset-2 @(doc.Id == _activeDoc ? "" : "hidden")">
+                        @if (doc.IsVisual)
+                        {
+                            <QueryDiagramEditor @key="doc.Id" Schema="@_schema" LoadColumns="LoadColumnsAsync"
+                                                Engine="@_profile.Engine" Busy="@doc.Busy" OnExecute="sql => RunVisualAsync(doc, sql)"
+                                                ShowResult="@(doc.Error is not null || doc.Status is not null)">
+                                <ResultContent>
+                                    @if (doc.Error is not null)
+                                    {
+                                        <div role="alert" class="alert alert-error alert-soft text-sm py-2 font-mono-sql whitespace-pre-wrap">@doc.Error</div>
+                                    }
+                                    else if (doc.Status is not null && doc.Result is not { Columns.Count: > 0 })
+                                    {
+                                        <p class="text-sm vs-muted">@doc.Status</p>
+                                    }
+
+                                    @if (doc.Result is { Columns.Count: > 0 })
+                                    {
+                                        <div class="flex-1 min-h-0 flex flex-col">
+                                            <DataViewer @key="doc.ResultKey" LoadPage="(page, size) => LoadDocPageAsync(doc, page, size)" PageSize="30"
+                                                        Elapsed="doc.Result.Elapsed"
+                                                        Note="@(doc.Result.Truncated ? $"(se muestran las primeras {VisualMaxRows})" : null)" />
+                                        </div>
+                                    }
+                                </ResultContent>
+                            </QueryDiagramEditor>
+                        }
+                        else
+                        {
+                            <QueryTab @key="doc.Id" Profile="@_profile" Schema="@_schema" TableNames="@_tables"
+                                      IsSql="@doc.IsSql" InitialText="@doc.Text" Active="@(doc.Id == _activeDoc)" />
+                        }
+                    </div>
                 }
             </div>
-        </div>
-
-        <div class="flex-1 min-h-0 relative">
-            @if (_docs.Count == 0)
-            {
-                <div class="h-full flex flex-col items-center justify-center gap-3 opacity-70">
-                    <p class="text-sm">No hay pestañas abiertas.</p>
-                    <div class="flex gap-2">
-                        <button class="btn btn-sm" @onclick="() => AddDoc(isSql: true)">Nueva pestaña SQL</button>
-                        <button class="btn btn-sm" @onclick="() => AddDoc(isSql: false)">Nueva pestaña EF Script</button>
-                        <button class="btn btn-sm" @onclick="AddVisualDoc">Nueva pestaña editor visual</button>
-                    </div>
-                </div>
-            }
-
-            @foreach (var doc in _docs)
-            {
-                <div class="absolute inset-0 @(doc.Id == _activeDoc ? "" : "hidden")">
-                    @if (doc.IsVisual)
-                    {
-                        <QueryDiagramEditor @key="doc.Id" Schema="@_schema" LoadColumns="LoadColumnsAsync"
-                                            Engine="@_profile.Engine" Busy="@doc.Busy" OnExecute="sql => RunVisualAsync(doc, sql)"
-                                            ShowResult="@(doc.Error is not null || doc.Status is not null)">
-                            <ResultContent>
-                                @if (doc.Error is not null)
-                                {
-                                    <div role="alert" class="alert alert-error alert-soft text-sm py-2 font-mono-sql whitespace-pre-wrap">@doc.Error</div>
-                                }
-                                else if (doc.Status is not null)
-                                {
-                                    <p class="text-sm opacity-70">@doc.Status</p>
-                                }
-
-                                @if (doc.Result is { Columns.Count: > 0 })
-                                {
-                                    <div class="flex-1 min-h-0 flex flex-col">
-                                        <DataViewer @key="doc.ResultKey" LoadPage="(page, size) => LoadDocPageAsync(doc, page, size)" PageSize="30" />
-                                    </div>
-                                }
-                            </ResultContent>
-                        </QueryDiagramEditor>
-                    }
-                    else
-                    {
-                    <QueryTab @key="doc.Id" Profile="@_profile" Schema="@_schema" TableNames="@_tables"
-                              IsSql="@doc.IsSql" InitialText="@doc.Text" Active="@(doc.Id == _activeDoc)" />
-                    }
-                </div>
-            }
-        </div>
-    }
+        }
     </div>
 </div>
 
@@ -136,13 +165,13 @@
         <div class="modal-box w-11/12 max-w-[90vw] h-[85vh] flex flex-col gap-3">
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-2 min-w-0">
-                    <h3 class="font-bold font-mono-sql truncate">@_selected</h3>
+                    <h3 class="font-semibold font-mono-sql truncate">@_selected</h3>
                     <span class="badge badge-ghost badge-sm">@_schema</span>
                 </div>
                 <button class="btn btn-ghost btn-sm" aria-label="Cerrar" @onclick="() => _showTable = false">✕</button>
             </div>
 
-            <div role="tablist" class="tabs tabs-box tabs-sm w-fit bg-base-100">
+            <div role="tablist" class="tabs tabs-box tabs-sm w-fit">
                 <button role="tab" class="tab @(_tableTab == "data" ? "tab-active" : "")" @onclick='() => _tableTab = "data"'>Datos</button>
                 <button role="tab" class="tab @(_tableTab == "schema" ? "tab-active" : "")" @onclick='() => _tableTab = "schema"'>Esquema</button>
                 <button role="tab" class="tab @(_tableTab == "diagram" ? "tab-active" : "")" @onclick='() => _tableTab = "diagram"'>Diagrama</button>
@@ -171,7 +200,7 @@
 @code {
     [Parameter] public Guid ProfileId { get; set; }
 
-    /// <summary>Pestaña de consulta abierta (SQL o EF Script).</summary>
+    /// <summary>Pestaña de consulta abierta (SQL, EF Script o editor visual).</summary>
     private sealed class QueryDocument
     {
         public Guid Id { get; } = Guid.NewGuid();
@@ -240,6 +269,7 @@
                 ? preferred
                 : _schemas.FirstOrDefault() ?? provider.GetDefaultSchema(_profile);
             await LoadTablesAsync();
+            Workbench.OpenWorkspace(_profile.Id, _profile.Name, _profile.Engine.DisplayName(), _schema);
         }
         catch (Exception ex)
         {
@@ -250,6 +280,7 @@
     private async Task OnSchemaChanged(ChangeEventArgs e)
     {
         _schema = e.Value?.ToString() ?? _schema;
+        Workbench.SetSchema(_schema);
         await LoadTablesAsync();
     }
 
@@ -298,6 +329,7 @@
         if (table.Schema != _schema)
         {
             _schema = table.Schema;
+            Workbench.SetSchema(_schema);
             await LoadTablesAsync();
         }
         await SelectTableAsync(table.Name);
@@ -400,4 +432,6 @@
         if (_activeDoc == doc.Id)
             _activeDoc = _docs.Count == 0 ? null : _docs[Math.Min(index, _docs.Count - 1)].Id;
     }
+
+    public void Dispose() => Workbench.CloseWorkspace();
 }

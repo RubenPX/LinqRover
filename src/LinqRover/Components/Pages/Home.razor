@@ -2,56 +2,57 @@
 @inject ProfileStore Store
 @inject NavigationManager Nav
 
+<div class="vs-page">
 <PageHeader Title="Conexiones" Subtitle="Elige una conexión guardada o crea una nueva.">
-    <button class="btn btn-primary btn-sm" @onclick="OpenNew">+ Nueva conexión</button>
+    <button class="btn btn-primary" @onclick="OpenNew">+ Nueva conexión</button>
 </PageHeader>
 
 @if (_loadError is not null)
 {
-    <div role="alert" class="alert alert-error mb-4">@_loadError</div>
+    <div role="alert" class="alert alert-error alert-soft mb-4">@_loadError</div>
 }
 
 @if (_profiles is null)
 {
-    <span class="loading loading-spinner"></span>
+    <span class="loading loading-spinner loading-sm"></span>
 }
 else if (_profiles.Count == 0)
 {
-    <div class="border-2 border-dashed border-base-300 rounded-box p-10 text-center">
-        <p class="font-semibold">Todavía no tienes conexiones</p>
-        <p class="text-sm opacity-60 mt-1">Crea una para empezar a explorar tus tablas.</p>
+    <div class="vs-empty">
+        <p class="font-semibold text-white">Todavía no tienes conexiones</p>
+        <p class="text-sm vs-muted mt-1">Crea una para empezar a explorar tus tablas.</p>
     </div>
 }
 else
 {
-    <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
+    <ul class="vs-list" aria-label="Conexiones guardadas">
         @foreach (var profile in _profiles)
         {
-            <div class="card bg-base-100 shadow-sm border border-base-300">
-                <div class="card-body gap-2">
-                    <div class="flex items-center justify-between">
-                        <h2 class="card-title text-base">@profile.Name</h2>
-                        <span class="badge @(profile.Engine == DatabaseEngine.Oracle ? "badge-error" : "badge-info") badge-sm">
+            <li class="vs-row">
+                <div class="min-w-0 flex flex-col gap-0.5">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="vs-row-title truncate">@profile.Name</span>
+                        <span class="badge badge-sm @(profile.Engine == DatabaseEngine.Oracle ? "badge-error" : "badge-info")">
                             @profile.Engine.DisplayName()
                         </span>
                     </div>
-                    <p class="text-sm opacity-70 font-mono-sql break-all">@profile.Host:@profile.Port / @profile.Database</p>
-                    <p class="text-sm opacity-70">Usuario: @profile.User</p>
-                    <div class="card-actions justify-end mt-2">
-                        <button class="btn btn-ghost btn-sm" @onclick="() => OpenEdit(profile)">Editar</button>
-                        <button class="btn btn-ghost btn-sm text-error" @onclick="() => DeleteAsync(profile)">Eliminar</button>
-                        <button class="btn btn-outline btn-primary btn-sm" @onclick="() => Connect(profile)">Conectar</button>
-                    </div>
+                    <span class="vs-row-meta font-mono-sql break-all">@profile.Host:@profile.Port / @profile.Database · @profile.User</span>
                 </div>
-            </div>
+                <div class="vs-row-actions">
+                    <button class="btn btn-ghost btn-sm" @onclick="() => OpenEdit(profile)">Editar</button>
+                    <button class="btn btn-ghost btn-sm text-error" @onclick="() => DeleteAsync(profile)">Eliminar</button>
+                    <button class="btn btn-primary btn-sm" @onclick="() => Connect(profile)">Conectar</button>
+                </div>
+            </li>
         }
-    </div>
+    </ul>
 }
 
 @if (_showForm)
 {
     <ConnectionForm Profile="@_editing" OnSaved="OnFormSaved" OnCancel="CloseForm" />
 }
+</div>
 
 @code {
     private List<DbConnectionProfile>? _profiles;

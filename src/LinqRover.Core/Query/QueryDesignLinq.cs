@@ -112,6 +112,17 @@ public static class QueryDesignLinq
             return sb.ToString();
         }
 
+        // DistinctBy: EF Core no traduce el operador DistinctBy, pero sí GroupBy + First(), que es la alternativa
+        // que recomienda el equipo de EF. Se agrupa por las columnas de salida marcadas y se queda la primera fila.
+        if (design.DistinctBy is { Count: > 0 } distinct)
+        {
+            var keys = distinct
+                .Select(d => outputs.First(o => o.Column == d))
+                .Select((o, n) => $"K{n} = x.{ClassGenerator.Identifier(o.Alias)}");
+            sb.Append($"\n    .GroupBy(x => new {{ {string.Join(", ", keys)} }})");
+            sb.Append("\n    .Select(g => g.First())");
+        }
+
         if (design.Skip is { } skip)
             sb.Append($"\n    .Skip({skip})");
 
